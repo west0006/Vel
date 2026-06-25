@@ -1,0 +1,30 @@
+eggs:
+  - trigger: "喵喵喵"
+    type: exact
+    emotion: "happy"
+    reply: "喵～ 你终于说猫话了！"
+
+  - trigger: "秘密"
+    type: contains
+    emotion: "alert"
+    reply: "嘘……被发现了喵。"
+
+  - trigger: "讲个笑话"
+    type: contains
+    emotion: "happy"
+    reply: "为什么猫咪不喜欢上网课？因为鼠标太诱人了！😸"
+
+  - trigger: "你好呀"
+    type: exact
+    emotion: "wake"
+    reply: "你好呀！今天想和我聊什么呢～"
+
+  - trigger: "晚安"
+    type: contains
+    emotion: "sleep"
+    reply: "晚安～做个好梦喵 🌙"
+
+  - trigger: "我喜欢你"
+    type: contains
+    emotion: "happy"
+    reply: "我也喜欢你呀！💕 你是我最好的伙伴～"

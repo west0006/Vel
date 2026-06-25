@@ -1,0 +1,61 @@
+# 默认应用配置
+# 首次启动时复制到 %APPDATA%/SmartDesktopPet/config/settings.yaml
+# 用户修改在设置面板中进行，写入 app_settings 表
+
+app:
+  name: "Vel - 智能AI桌宠"
+  version: "0.1.0-alpha"
+
+window:
+  pet_size: 250  # 猫咪窗口尺寸 px
+  pet_size_min: 200
+  pet_size_max: 350
+
+llm:
+  model: "qwen2.5:7b-instruct-q4_K_M"
+  host: "127.0.0.1"
+  port: 11434
+  timeout: 30
+  max_tokens: 2048
+  temperature: 0.7
+  context_window: 10  # 对话滑动窗口轮数
+  fallback_replies:
+    - "喵...我好像有点卡住了，稍等一下哦~"
+    - "啊哦，我的小脑袋转不动了，让我重启一下思维..."
+    - "现在有点迷糊，你要不要换个话题？"
+
+db:
+  path: "data/pet.db"
+  wal_mode: true
+
+memory:
+  embedding_model: "paraphrase-multilingual-MiniLM-L12-v2"
+  faiss_index_path: "data/faiss.index"
+  faiss_dimension: 384
+  decay_half_life_days: 30
+  summary_interval: 50  # 每多少轮对话生成一次摘要
+
+health:
+  drink_interval_min: 45
+  drink_target_ml: 2000
+  sedentary_threshold_min: 50
+  active_hours_start: "09:00"
+  active_hours_end: "21:00"
+  meal_times:
+    lunch: "11:30-12:30"
+    dinner: "17:30-18:30"
+
+schedule:
+  reminder_offset_min: 15
+  instance_window_months: 3
+
+search:
+  bing_timeout: 5
+  cache_ttl_search: 1800   # 30分钟
+  cache_ttl_location: 14400  # 4小时
+  gaode_daily_limit: 4500
+  bing_monthly_limit: 900
+
+sleep:
+  start: "23:00"
+  end: "07:00"

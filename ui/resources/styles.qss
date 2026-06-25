@@ -1,0 +1,104 @@
+/* =============================================
+   Vel 智能AI桌宠 — 扁平圆润极简线条样式表
+   暖橙 #FF6B35 / 背景 #FFFBF5 / 卡片 #FAFAFA
+   圆角：8~16px
+   ============================================= */
+
+QWidget {
+    background: #FFFBF5;
+    color: #2C2C2C;
+    font-family: "Microsoft YaHei UI";
+    font-weight: normal;
+    font-size: 13px;
+}
+
+QLineEdit, QTextEdit, QPlainTextEdit {
+    background: #FFFFFF;
+    border: 1px solid #E8E4E0;
+    border-radius: 8px;
+    padding: 6px 10px;
+    color: #2C2C2C;
+}
+QLineEdit:focus, QTextEdit:focus {
+    border: 1px solid #FF6B35;
+}
+
+QListWidget, QTableWidget, QTreeWidget {
+    background: #FAFAFA;
+    border: 1px solid #E8E4E0;
+    border-radius: 12px;
+    outline: none;
+}
+QListWidget::item, QTableWidget::item {
+    padding: 8px 12px;
+    color: #4A4A4A;
+    background: transparent;
+}
+QListWidget::item:selected, QTableWidget::item:selected {
+    background: #FFF2ED;
+    color: #2C2C2C;
+}
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 6px;
+}
+QScrollBar::handle:vertical {
+    background: #E0DCD8;
+    border-radius: 3px;
+    min-height: 24px;
+}
+QScrollBar::handle:vertical:hover { background: #C4BFBA; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+
+QScrollBar:horizontal { background: transparent; height: 6px; }
+QScrollBar::handle:horizontal { background: #E0DCD8; border-radius: 3px; min-width: 24px; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+
+QCheckBox, QRadioButton { spacing: 8px; color: #4A4A4A; }
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 18px; height: 18px;
+    border: 1px solid #E8E4E0; border-radius: 4px;
+    background: #FFFFFF;
+}
+QCheckBox::indicator:checked { background: #FF6B35; border-color: #FF6B35; }
+QRadioButton::indicator { border-radius: 9px; }
+QRadioButton::indicator:checked { background: #FF6B35; border-color: #FF6B35; }
+
+QSlider::groove:horizontal { height: 6px; background: #E8E4E0; border-radius: 3px; }
+QSlider::handle:horizontal {
+    width: 16px; height: 16px; margin: -5px 0;
+    background: #FF6B35; border-radius: 8px; border: none;
+}
+
+QProgressBar {
+    border: 1px solid #E8E4E0; border-radius: 8px;
+    text-align: center; background: #FAFAFA;
+    font-weight: bold; color: #4A4A4A;
+}
+QProgressBar::chunk { background: #FF6B35; border-radius: 6px; }
+
+QToolTip {
+    background: #2C2C2C; border: none; border-radius: 6px;
+    padding: 4px 8px; color: #FFFFFF; font-size: 12px;
+}
+
+QMenu {
+    background: #FFFFFF; border: 1px solid #E8E4E0;
+    border-radius: 12px; padding: 4px 0;
+}
+QMenu::item { padding: 8px 24px; color: #4A4A4A; }
+QMenu::item:selected { background: #FFF2ED; color: #2C2C2C; }
+QMenu::separator { height: 1px; background: #E8E4E0; margin: 4px 12px; }
+
+QCalendarWidget { background: #FFFFFF; border: 1px solid #E8E4E0; border-radius: 12px; }
+QCalendarWidget QToolButton { color: #2C2C2C; font-weight: bold; border: none; padding: 6px; }
+
+QGroupBox {
+    border: 1px solid #E8E4E0; border-radius: 12px;
+    margin-top: 12px; padding-top: 16px;
+    font-weight: bold; color: #2C2C2C;
+}
+QGroupBox::title {
+    subcontrol-origin: margin; left: 12px; padding: 0 6px;
+}

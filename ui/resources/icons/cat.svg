@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <!-- 左耳 -->
+  <rect x="6" y="0" width="4" height="4" fill="#FF8C5A"/>
+  <rect x="8" y="2" width="2" height="2" fill="#FFB088"/>
+
+  <!-- 右耳 -->
+  <rect x="22" y="0" width="4" height="4" fill="#FF8C5A"/>
+  <rect x="22" y="2" width="2" height="2" fill="#FFB088"/>
+
+  <!-- 头部 -->
+  <rect x="6" y="4" width="20" height="10" fill="#FFAA7A"/>
+  <rect x="4" y="6" width="2"  height="6" fill="#FFAA7A"/>
+  <rect x="26" y="6" width="2" height="6" fill="#FFAA7A"/>
+
+  <!-- 左眼 -->
+  <rect x="10" y="8" width="4" height="4" fill="#3A3A3A"/>
+  <rect x="10" y="8" width="1" height="1" fill="#FFFFFF"/>
+
+  <!-- 右眼 -->
+  <rect x="18" y="8" width="4" height="4" fill="#3A3A3A"/>
+  <rect x="18" y="8" width="1" height="1" fill="#FFFFFF"/>
+
+  <!-- 鼻子 -->
+  <rect x="14" y="12" width="4" height="2" fill="#FF6B35"/>
+
+  <!-- 身体 -->
+  <rect x="8" y="14" width="16" height="10" fill="#FFAA7A"/>
+
+  <!-- 前腿 -->
+  <rect x="8" y="22" width="4" height="6" fill="#FF8C5A"/>
+  <rect x="20" y="22" width="4" height="6" fill="#FF8C5A"/>
+
+  <!-- 尾巴 -->
+  <rect x="24" y="14" width="2" height="4" fill="#FF8C5A"/>
+  <rect x="26" y="12" width="4" height="2" fill="#FF8C5A"/>
+  <rect x="28" y="14" width="2" height="4" fill="#FFAA7A"/>
+
+  <!-- 胸腹高光 -->
+  <rect x="12" y="18" width="8" height="4" fill="#FFE0CC"/>
+</svg>

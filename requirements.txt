@@ -1,0 +1,44 @@
+# =============================================
+# Vel - 智能AI桌宠 依赖清单
+# =============================================
+# Python 3.11
+# 安装: pip install -r requirements.txt
+# =============================================
+
+# --- 桌面框架 ---
+PyQt5>=5.15.9
+pyqt5-tools>=5.15.9
+
+# --- LLM 通信 ---
+requests>=2.31.0
+
+# --- 向量记忆（FAISS + 编码） ---
+faiss-cpu>=1.7.4
+sentence-transformers>=2.2.2
+numpy>=1.24.0
+
+# --- 数据库 ---
+# SQLite3 为 Python 标准库，无需额外安装
+
+# --- 加密 ---
+cryptography>=41.0.0
+pywin32>=306              # Windows DPAPI 支持
+
+# --- 系统监测 ---
+psutil>=5.9.5
+pynvml>=11.5.0            # NVIDIA GPU 显存监控（可选）
+
+# --- 定时调度 ---
+APScheduler>=3.10.4
+
+# --- 系统通知 ---
+plyer>=2.1.0
+
+# --- 测试 ---
+pytest>=7.4.0
+pytest-mock>=3.14.0
+pytest-qt>=4.2.0
+
+# --- 工具 ---
+PyYAML>=6.0
+dateparser>=1.2.0
