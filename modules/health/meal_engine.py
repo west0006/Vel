@@ -118,6 +118,11 @@ class MealEngine:
 
         if not recommendation:
             recommendation = f"到{meal_name}时间啦~记得按时吃饭哦！🍚"
+        else:
+            # 追加一句健康小贴士
+            tip = self._health_tip(context)
+            if tip:
+                recommendation += f"\n💡 {tip}"
 
         # 4. 发送通知
         schedule_id = f"meal_{meal_type}_{datetime.now().strftime('%Y%m%d%H%M')}"
@@ -192,7 +197,7 @@ class MealEngine:
         except Exception:
             return []
 
-    def _get_recent_meals(self, days: int = 3) -> List[Dict[str, Any]]:
+    def _get_recent_meals(self, days: int = 7) -> List[Dict[str, Any]]:
         """获取最近 N 天的饮食记录。"""
         try:
             db = registry.get("database")
@@ -311,6 +316,26 @@ class MealEngine:
     # ------------------------------------------------------------------
     # LLM 调用
     # ------------------------------------------------------------------
+
+    def _health_tip(self, ctx: dict) -> Optional[str]:
+        """生成一句饮食健康小贴士。"""
+        llm = registry.get("llm_service")
+        if llm is None or getattr(llm, '_is_degraded', True):
+            return None
+        try:
+            profile = ctx.get("profile", {})
+            recent = ctx.get("recent_meals", [])
+            tip_prompt = (
+                f"用户最近吃了：{', '.join(m.get('content','')[:20] for m in recent[:3] if m.get('content'))}。"
+                f"给一句15字以内的饮食健康小提醒，猫咪口吻。"
+            )
+            reply = llm._call_ollama([
+                {"role": "system", "content": "你是健康助手，回复15字以内。"},
+                {"role": "user", "content": tip_prompt},
+            ])
+            return reply.strip() if reply and len(reply) > 2 else None
+        except Exception:
+            return None
 
     def _call_llm(self, prompt: str) -> Optional[str]:
         """调用 LLM 生成饮食推荐。"""

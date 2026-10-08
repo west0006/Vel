@@ -46,7 +46,7 @@ class PersonalityExtractor:
     EMOTION_INTENSITY_THRESHOLD = 0.7
 
     # 积累多少轮对话后触发 LLM 摘要
-    SUMMARY_BATCH_SIZE = 50
+    SUMMARY_BATCH_SIZE = 5
 
     def __init__(self):
         self._dialogue_buffer: List[Dict[str, str]] = []
@@ -145,15 +145,25 @@ class PersonalityExtractor:
         )
 
         prompt = (
-            "请从以下对话中提取用户的新偏好、习惯或重要事件。\n"
-            "输出 JSON 数组，每个元素包含：\n"
-            "  - trait_name: 特质名称（如 prefer_light_food）\n"
-            "  - value: 具体值\n"
-            "  - category: preference/habit/event/fact\n"
-            "  - evidence: 简要证据\n"
-            "如果没有新发现，输出 []。\n\n"
+            "从以下对话中深度分析用户，提取新发现的信息。\n"
+            "输出 JSON 对象，格式：\n"
+            "{\n"
+            "  \"traits\": [\n"
+            "    {\"trait_name\": \"名称\", \"value\": \"值\",\n"
+            "     \"category\": \"preference/habit/personality/goal/event\",\n"
+            "     \"evidence\": \"原文引用(≤20字)\"}\n"
+            "  ],\n"
+            "  \"summary\": \"10字以内概括这段对话中用户的情绪或状态\"\n"
+            "}\n\n"
+            "category 说明：\n"
+            "  preference = 喜恶(\"喜欢辣\"/\"不喜欢早起\")\n"
+            "  habit = 习惯(\"每天跑步\"/\"熬夜\")\n"
+            "  personality = 性格(\"细心\"/\"拖延\")\n"
+            "  goal = 目标(\"备考\"/\"减肥\")\n"
+            "  event = 事件(\"下周出差\")\n\n"
+            "注意：只提取对话中明确体现的新信息，不推测。没有新发现时 traits 为空数组。\n\n"
             f"对话:\n{dialogue_text}\n\n"
-            "只输出 JSON 数组，不要其他内容："
+            "只输出 JSON 对象，不要其他内容："
         )
 
         try:
@@ -166,12 +176,23 @@ class PersonalityExtractor:
                 reply = llm.generate(prompt)
 
             # 提取 JSON
-            start = reply.find('[')
-            end = reply.rfind(']')
+            start = reply.find('{')
+            end = reply.rfind('}')
             if start >= 0 and end > start:
                 reply = reply[start:end + 1]
 
-            items = json.loads(reply)
+            data = json.loads(reply)
+            items = data.get("traits", [])
+            user_summary = data.get("summary", "")
+            if user_summary:
+                items.append({
+                    "trait_name": "latest_mood_summary",
+                    "value": user_summary,
+                    "category": "personality",
+                    "evidence": user_summary,
+                    "confidence": 0.5,
+                    "source": "auto",
+                })
             logger.info(f"LLM 摘要抽取: {len(items)} 条候选特质")
 
             # 清空缓冲区

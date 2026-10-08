@@ -34,7 +34,7 @@ class _ReplyBridge(QObject):
     ready = pyqtSignal(str, str)
 
 class VelApplication:
-    _reply_signal = pyqtSignal(str, str)
+    # _reply_signal = pyqtSignal(str, str)
 
     def __init__(self):
         self._app: QApplication = None
@@ -57,8 +57,8 @@ class VelApplication:
     def run(self) -> None:
         self._init_logging()
         self._init_database()
-        self._init_fonts()
         self._init_app()
+        self._init_fonts()
         self._init_state_manager()
         self._register_services()
         self._init_ui()
@@ -115,6 +115,9 @@ class VelApplication:
                 family_name = families[0]
                 self._custom_font_family = family_name
                 logger.info(f"字体已加载: {family_name} ({f.name})")
+        # 重设应用字体为自定义字体
+        if hasattr(self, '_custom_font_family'):
+            self._app.setFont(QFont(self._custom_font_family, 9))
 
     def _init_app(self) -> None:
         self._app = QApplication(sys.argv)
@@ -197,6 +200,7 @@ class VelApplication:
         bus.subscribe_ui(EVENT_SCHEDULE_ALERT, self._on_schedule_alert)
         bus.subscribe_ui(EVENT_SYSTEM_STATUS, self._on_system_status)
         bus.subscribe_ui(EVENT_MODE_CHANGE, self._on_mode_change)
+        bus.subscribe_ui("CONTEXT_HINT", lambda d: self._chat_bubble.show_context_hint(d["text"]))
         logger.info("事件监听器已注册")
 
     def _on_health_reminder(self, data: dict) -> None:
@@ -244,6 +248,14 @@ class VelApplication:
                                            data.get("guide_text",""),
                                            data.get("duration_min",3))
                     if r: self._floating_pet.show_tip(r[:40], 4000)
+            return cb
+        if rt == "drink_undo":
+            dr = registry.get("drink_reminder")
+            log_id = data.get("log_id")
+            def cb(a):
+                if dr and a == "undo":
+                    r = dr.undo_drink(log_id)
+                    self._floating_pet.show_tip(r[:40], 4000)
             return cb
         return None
 
@@ -293,16 +305,29 @@ class VelApplication:
 
     def _init_services_later(self) -> None:
         from apscheduler.schedulers.qt import QtScheduler
+
         self._health_scheduler = QtScheduler()
         self._health_scheduler.start()
         registry.register("health_scheduler", self._health_scheduler)
 
+        # LLM 初始化
         try:
             from services.llm_service import LLMService
-            self._llm_service = LLMService(model="qwen2.5:3b",timeout=120)
+            self._llm_service = LLMService(model="qwen2.5:7b", timeout=60, max_tokens=512)
             registry.register("llm_service", self._llm_service)
             ok, msg = self._llm_service.check_connection()
             if ok:
+                # 预热：后台发一条短消息触发模型加载
+                import threading
+                def _warm():
+                    try:
+                        self._llm_service._call_ollama([
+                            {"role": "user", "content": "hi"}
+                        ])
+                        logger.info("LLM 模型预热完成")
+                    except Exception:
+                        pass
+                threading.Thread(target=_warm, daemon=True).start()
                 self._floating_pet.show_tip("Vel 已准备好~", 3000)
             else:
                 self._floating_pet.show_tip("AI 未连接，降级模式", 5000)
@@ -310,16 +335,21 @@ class VelApplication:
         except Exception as e:
             logger.error(f"LLM 失败: {e}")
 
-        try:
-            from services.memory_service import MemoryService
-            self._memory_service = MemoryService(
-                db_path=str(PROJECT_ROOT / "data" / "pet.db"),
-                faiss_path=str(PROJECT_ROOT / "data" / "faiss.index"),
-            )
-            self._memory_service.initialize()
-            registry.register("memory_service", self._memory_service)
-        except Exception as e:
-            logger.warning(f"记忆服务失败: {e}")
+        # 记忆服务后台加载（sentence-transformers 3-5s，不阻塞 UI）
+        import threading
+        def _init_memory():
+            try:
+                from services.memory_service import MemoryService
+                ms = MemoryService(
+                    db_path=str(PROJECT_ROOT / "data" / "pet.db"),
+                    faiss_path=str(PROJECT_ROOT / "data" / "faiss.index"),
+                )
+                ms.initialize()
+                registry.register("memory_service", ms)
+                logger.info("记忆服务已注册")
+            except Exception as e:
+                logger.warning(f"记忆服务失败: {e}")
+        threading.Thread(target=_init_memory, daemon=True).start()
 
         try:
             from modules.personality.extractor import PersonalityExtractor
@@ -337,19 +367,12 @@ class VelApplication:
         except Exception as e:
             logger.error(f"对话管理器失败: {e}")
 
-        # try:
-        #     from modules.agent_router import AgentRouter
-        #     registry.register("agent_router", AgentRouter())
-        #     logger.info("Agent路由器已注册")
-        # except Exception as e:
-        #     logger.warning(f"Agent路由器失败: {e}")
-
         try:
-            from services.agent_service import AgentService
-            registry.register("agent_service", AgentService())
-            logger.info("Agent服务已注册")
+            from services.tool_executor import ToolExecutor
+            registry.register("tool_executor", ToolExecutor())
+            logger.info("工具执行器已注册")
         except Exception as e:
-            logger.warning(f"Agent服务失败: {e}")
+            logger.warning(f"工具执行器失败: {e}")
 
         for mod_name, cls_name, key in [
             ("modules.health.drink_reminder", "DrinkReminder", "drink_reminder"),
@@ -470,20 +493,24 @@ class VelApplication:
         if self._chat_bubble.is_bubble_visible:
             self._chat_bubble.hide_bubble()
         else:
-            self._chat_bubble.show_bubble(self._floating_pet.geometry())
-            # 每日问候检测
-            greeting = registry.get("greeting_service")
-            if greeting:
-                msg = greeting.check_and_greet()
-                if msg:
-                    self._notification_manager.push({
-                        "id": f"greeting_{id(msg)}",
-                        "title": "🌅 早上好" if "早" in msg else "☀️ 你好",
-                        "message": msg,
-                        "priority": 5,
-                        "duration_ms": 5000,
-                        "notif_type": "greeting",
-                    })
+            QTimer.singleShot(0, lambda: self._show_bubble_safe())
+
+    def _show_bubble_safe(self) -> None:
+        """延迟展开气泡，避免同事件循环内被 OutsideClickFilter 误杀。"""
+        self._chat_bubble.show_bubble(self._floating_pet.geometry())
+        # 每日问候检测
+        greeting = registry.get("greeting_service")
+        if greeting:
+            msg = greeting.check_and_greet()
+            if msg:
+                self._notification_manager.push({
+                    "id": f"greeting_{id(msg)}",
+                    "title": "🌅 早上好" if "早" in msg else "☀️ 你好",
+                    "message": msg,
+                    "priority": 5,
+                    "duration_ms": 5000,
+                    "notif_type": "greeting",
+                })
 
     def _on_user_message(self, text: str) -> None:
         self._last_activity = datetime.now()
@@ -493,19 +520,33 @@ class VelApplication:
         self._floating_pet.set_emotion("thinking", loop=True)
         self._chat_bubble.show_thinking()
         import threading
+
+        # 流式回调：后台线程通过信号逐 chunk 推送到主线程 UI
+        def _on_stream(chunk: str) -> None:
+            self._reply_bridge.ready.emit(text, chunk)
+
+        self._chat_manager.set_stream_callback(_on_stream)
+
         def _worker():
             try:
                 reply = self._chat_manager.process_message(text)
-                self._reply_bridge.ready.emit(text, reply)
+                # 标记流结束 → 主线程固化
+                self._reply_bridge.ready.emit(text, "\0__END__")
             except Exception as e:
                 logger.exception(f"消息异常: {e}")
-                self._reply_bridge.ready.emit(text, "喵...没听清，再说一遍吗~")
+                self._reply_bridge.ready.emit(text, "\0__ERR__" + str(e))
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _on_reply_ready(self, user_text: str, reply: str) -> None:
-        self._chat_bubble.hide_thinking()
-        self._chat_bubble.add_message("assistant", reply)
-        self._floating_pet.set_emotion("idle")
+    def _on_reply_ready(self, user_text: str, data: str) -> None:
+        if data == "\0__END__":
+            self._chat_bubble.stream_finish()
+            self._floating_pet.set_emotion("idle")
+        elif data.startswith("\0__ERR__"):
+            self._chat_bubble.stream_clear()
+            self._chat_bubble.add_message("assistant", "喵...没听清，再说一遍吗~")
+            self._floating_pet.set_emotion("idle")
+        else:
+            self._chat_bubble.stream_append(data)
 
     def _on_show_schedule(self) -> None:
         from ui.mini_schedule import MiniScheduleWidget
@@ -519,7 +560,9 @@ class VelApplication:
         self._settings_win.show()
 
     def _on_show_about(self) -> None:
-        self._floating_pet.show_tip("Vel v0.1.0-alpha 🐱", 5000)
+        from ui.about_dialog import AboutDialog
+        dlg = AboutDialog(self._floating_pet)
+        dlg.exec_()
 
     def _on_exit(self) -> None:
         logger.info("用户请求退出")
@@ -558,6 +601,8 @@ class VelApplication:
     def _graceful_exit(self) -> None:
         logger.info("关闭中...")
         self._floating_pet.save_position()
+        self._system_tray.hide()
+        self._floating_pet.cleanup()
 
         # 关闭调度器（顺序重要：scheduler → eventbus → db）
         if hasattr(self, '_health_scheduler') and self._health_scheduler:

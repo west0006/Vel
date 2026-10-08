@@ -29,8 +29,10 @@ class DiaryGenerator:
         target = target_date or date.today()
         context = self._collect(target)
 
-        # 使用固定模板（不依赖LLM，避免LLM不可用时日记空白）
-        summary = self._template_summary(context)
+        # 优先 LLM 生成个性化日记，失败回退模板
+        summary = self._llm_diary(context, target)
+        if not summary:
+            summary = self._template_summary(context, target)
         if not summary:
             return None
 
@@ -121,3 +123,28 @@ class DiaryGenerator:
         if len(parts) == 1:
             return f"今天是{target.strftime('%m月%d日')}，{parts[0]}。平常的一天，也是珍贵的一天喵~"
         return f"{'，'.join(parts)}。又是充实的一天，明天也要元气满满喵~"
+
+    def _llm_diary(self, d: Dict[str, int], target: date) -> Optional[str]:
+        """用 LLM 生成个性化日记，失败返回 None。"""
+        llm = registry.get("llm_service")
+        if llm is None:
+            return None
+        if getattr(llm, '_is_degraded', True):
+            return None
+        try:
+            prompt = (
+                f"你是一只叫 Vel 的猫咪，现在要写{target.strftime('%m月%d日')}的日记。"
+                f"今天完成了{d['completed_tasks']}个日程，喝了{d['drink_ml']}ml水，"
+                f"活动了{d['activities']}次，记录了{d['meals']}餐，"
+                f"情绪是{d.get('mood','平静')}。"
+                f"用温暖猫咪口吻写一段80字以内的日记，可爱、略带吐槽、有陪伴感。"
+            )
+            reply = llm._call_ollama([
+                {"role": "system", "content": "你是猫咪日记助手，回复80字以内。"},
+                {"role": "user", "content": prompt},
+            ])
+            if reply and len(reply) > 10:
+                return reply.strip()
+        except Exception as e:
+            logger.debug(f"LLM 日记生成失败: {e}")
+        return None

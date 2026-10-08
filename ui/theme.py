@@ -47,6 +47,7 @@ class Colors:
 
 class Fonts:
     FAMILY = "Microsoft YaHei UI"
+    FAMILY_CUSTOM = "MaokenAssortedSans"  # 项目自带字体，优先使用
     FAMILY_MONO = "Consolas"
 
     SIZE_XS = 12
@@ -62,7 +63,7 @@ class Fonts:
 
     @staticmethod
     def style(size: int = SIZE_MD, weight: int = 400) -> str:
-        return f"font: {weight} {size}px '{Fonts.FAMILY}';"
+        return f"font: {weight} {size}px '{Fonts.FAMILY_CUSTOM}', '{Fonts.FAMILY}';"
 
     @staticmethod
     def mono(size: int = SIZE_SM) -> str:
@@ -134,7 +135,7 @@ class Styles:
             border: 1px solid {Colors.BORDER};
             border-radius: {Sizes.INPUT_RADIUS}px;
             padding: 8px 12px;
-            font: 400 {Fonts.CHAT_INPUT}px '{Fonts.FAMILY}';
+            font: 400 {Fonts.CHAT_INPUT}px '{Fonts.FAMILY_CUSTOM}', '{Fonts.FAMILY}';
             background: {Colors.BG_MAIN}; color: {Colors.TEXT_PRIMARY};
         }}
         QLineEdit:focus {{ border: 2px solid {Colors.BORDER_FOCUS}; }}
@@ -151,7 +152,7 @@ class Styles:
     PROGRESS_BAR = f"""
         QProgressBar {{
             border: 1px solid {Colors.BORDER}; border-radius: 4px;
-            text-align: center; font: 600 {Fonts.SIZE_XS}px '{Fonts.FAMILY}';
+            text-align: center; font: 600 {Fonts.SIZE_XS}px '{Fonts.FAMILY_CUSTOM}', '{Fonts.FAMILY}';
             color: {Colors.TEXT_PRIMARY}; background: {Colors.BG_MAIN}; height: 22px;
         }}
         QProgressBar::chunk {{ background-color: {Colors.ACCENT}; border-radius: 3px; }}
@@ -180,7 +181,7 @@ def get_button_style(variant: str = "primary", size: int = Fonts.SIZE_SM,
         QPushButton {{
             border-radius: {Sizes.BUTTON_RADIUS}px;
             padding: 6px 16px;
-            font: 600 {size}px '{Fonts.FAMILY}';
+            font: 600 {size}px '{Fonts.FAMILY_CUSTOM}', '{Fonts.FAMILY}';
             {'min-width:' + str(fixed_width) + 'px;' if fixed_width else ''}
         }}
     """

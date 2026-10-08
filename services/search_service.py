@@ -37,6 +37,7 @@ class SearchService:
         ".bing.com", ".wikipedia.org", ".baidu.com", ".zhihu.com",
         ".csdn.net", ".jianshu.com", ".github.com", ".stackoverflow.com",
         ".amap.com", ".duckduckgo.com",
+        "duckduckgo.com", "www.duckduckgo.com",
     ]
 
     def __init__(self):
@@ -83,6 +84,11 @@ class SearchService:
                 self._bing_endpoint = bing.get("endpoint", self._bing_endpoint)
         except Exception:
             pass
+
+        # 检测占位符 / 无效 key，直接跳过 Bing
+        if not self._bing_key or "你的" in self._bing_key or len(self._bing_key) < 20:
+            logger.warning("Bing API Key 无效或未配置，搜索将直接使用 DuckDuckGo")
+            self._degraded_to_duckduckgo = True
 
     def search(self, query: str, max_results: int = 5) -> str:
         if not query.strip(): return ""
@@ -135,8 +141,8 @@ class SearchService:
                     logger.warning("Bing 结果质量不足，降级")
                     return None
                 return self._format_results(results)
-            elif resp.status_code == 403:
-                logger.error("Bing API 返回403，可能配额已超限")
+            elif resp.status_code in (401, 403):
+                logger.error(f"Bing API 认证失败（{resp.status_code}），永久降级到 DuckDuckGo")
                 self._degraded_to_duckduckgo = True
                 return None
             else:
@@ -144,6 +150,10 @@ class SearchService:
                 return None
         except requests.Timeout:
             logger.warning("Bing 搜索超时")
+            return None
+        except (UnicodeEncodeError, UnicodeDecodeError) as e:
+            logger.warning(f"Bing 搜索编码异常，降级: {e}")
+            self._degraded_to_duckduckgo = True
             return None
         except Exception as e:
             logger.error(f"Bing 搜索异常: {e}")
@@ -255,25 +265,23 @@ class SearchService:
             return None
 
     def _search_duckduckgo_lib(self, query: str, count: int = 5) -> Optional[str]:
-        """通过 duckduckgo-search 包兜底。"""
+        """通过 ddgs / duckduckgo_search 包兜底。"""
+        DDGS = None
+        # 优先新包名 ddgs
         try:
-            from duckduckgo_search import DDGS
-            results = list(DDGS().text(query, max_results=count))
-            if not results:
-                return self._search_duckduckgo_api(query, count)
-            formatted = []
-            for r in results[:count]:
-                title = r.get("title", "")
-                body = r.get("body", "")
-                href = r.get("href", "")
-                formatted.append(f"**{title}**\n{body[:200]}\n{href}")
-            logger.info(f"DDG-lib 返回 {len(formatted)} 条结果")
-            return "\n\n".join(formatted)
+            from ddgs import DDGS as DDGS_new
+            DDGS = DDGS_new
         except ImportError:
-            return self._search_duckduckgo_api(query, count)
-        except Exception as e:
-            logger.debug(f"DDG-lib 搜索失败: {e}")
-            return self._search_duckduckgo_api(query, count)
+            pass
+        # 回退旧包名，抑制弃用警告
+        if DDGS is None:
+            try:
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", RuntimeWarning)
+                    from duckduckgo_search import DDGS
+            except ImportError:
+                return self._search_duckduckgo_api(query, count)
 
     def _search_duckduckgo_api(self, query: str, count: int = 5) -> Optional[str]:
         try:
@@ -422,9 +430,8 @@ class SearchService:
 
     def needs_search(self, user_input: str) -> bool:
         search_triggers = [
-            "什么", "怎么", "为什么", "谁", "哪里", "哪个",
-            "天气", "新闻", "热搜", "最新", "今天",
-            "股价", "比赛", "排名", "多少",
+            "天气", "新闻", "热搜", "股价", "比赛", "排名",
+            "搜索", "帮我搜", "查一下", "查查",
         ]
         return any(trigger in user_input for trigger in search_triggers)
 

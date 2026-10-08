@@ -1,12 +1,11 @@
 """
-对话管理器模块。
-
-管理用户与桌宠之间的多轮对话，包括上下文窗口维护、记忆召回、
-个性化提示注入、情感分析触发等功能。
+对话管理器模块。统一 LLM 中枢 + 工具调用。
 """
 
+import json
+import re
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.event_bus import bus, EVENT_MOOD_DETECTED
 from core.service_registry import registry
@@ -16,18 +15,15 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+TOOL_TAG_RE = re.compile(r'<tool_call>\s*(\{.+?\})\s*</tool_call>', re.DOTALL)
+FALLBACK_JSON_RE = re.compile(r'\{\s*"tool"\s*:\s*"(create_reminder|create_memo|query_schedule|get_diary|search_web)"', re.DOTALL)
+MAX_TOOL_CALLS = 2
+
 
 class ChatManager:
-    """对话管理器。
+    """对话管理器。统一 LLM 中枢。"""
 
-    协调 LLM 服务、记忆服务和提示词构建器，提供完整的对话体验。
-    维护10轮滑动窗口上下文，自动召回相关记忆并注入提示词。
-    """
-
-    def __init__(self, context_window: int = 10, summary_interval: int = 5):
-        self._context_window = context_window
-        self._summary_interval = summary_interval
-
+    def __init__(self, summary_interval: int = 5):
         self._llm: Optional[LLMService] = None
         self._prompt_builder = PromptBuilder()
         self._memory_service = None
@@ -36,128 +32,192 @@ class ChatManager:
         self._mood_logger = None
 
         self._turn_count = 0
-        self._on_reply_ready: Optional[Callable[[str], None]] = None
+        self._summary_interval = summary_interval
+        self._history_cache: List[Dict[str, Any]] = []  # 内存 LRU，最多 100 条
 
-    # ------------------------------------------------------------------
-    # 初始化
-    # ------------------------------------------------------------------
+
+    # ────────────── 初始化 ──────────────
 
     def initialize(self) -> None:
-        """初始化对话管理器，从注册器获取全部依赖。"""
         self._llm = registry.get("llm_service")
         self._memory_service = registry.get("memory_service")
         self._extractor = registry.get("personality_extractor")
         self._profile_manager = registry.get("profile_manager")
         self._mood_logger = registry.get("mood_logger")
-
-        if self._extractor is None:
-            logger.info("个性化抽取器未注册，将跳过特质抽取")
-        if self._profile_manager is None:
-            logger.info("画像管理器未注册，将跳过画像入库")
-
         logger.info("对话管理器初始化完成")
-
-    def set_on_reply_ready(self, callback: Callable[[str], None]) -> None:
-        self._on_reply_ready = callback
 
     def set_user_name(self, name: str) -> None:
         self._prompt_builder.set_user_name(name)
         if self._llm:
             self._llm.set_user_name(name)
 
-    # ------------------------------------------------------------------
-    # 核心对话流程
-    # ------------------------------------------------------------------
+    # ────────────── 核心管线 ──────────────
 
     def process_message(self, user_input: str) -> str:
         logger.info(f"对话输入: {user_input[:80]}...")
 
-        # 1. Agent 路由：意图分类 → 分流处理
-        try:
-            router = registry.get("agent_service")
-            if router:
-                routed = router.handle(user_input)
-                if routed:
-                    self._save_to_archive("user", user_input)
-                    self._save_to_archive("assistant", routed)
-                    return routed
-        except Exception as e:
-            logger.warning(f"Agent路由异常: {e}")
+        # 1. 彩蛋预检
+        ee = registry.get("easter_egg_engine")
+        if ee:
+            egg = ee.match(user_input)
+            if egg:
+                self._save_to_archive("user", user_input)
+                self._save_to_archive("assistant", egg["reply"])
+                return egg["reply"]
 
-        # 2. 保存用户消息
+        # 2. 存档用户消息
         self._save_to_archive("user", user_input)
 
-        # 3. 检索相关记忆
-        memory_texts = []
-        if self._memory_service:
-            try:
-                memories = self._memory_service.search(user_input, top_k=3, min_score=0.4)
-                memory_texts = [m["summary"] for m in memories]
-            except Exception as e:
-                logger.warning(f"记忆检索失败: {e}")
+        # 3. 记忆召回
+        memory_texts = self._retrieve_memories(user_input)
 
-        # 4. 构建个性化系统提示
+        # 4. 构建系统提示词
         if self._prompt_builder and self._llm:
             system_msg = self._prompt_builder.build_system_message()
             self._llm.set_system_prompt(system_msg["content"])
 
-        # 5. 搜索意图检测
-        search_context = ""
-        search_svc = registry.get("search_service")
-        if search_svc and search_svc.needs_search(user_input):
-            try:
-                search_result = search_svc.search(user_input)
-                if search_result and "暂不可用" not in search_result:
-                    search_context = search_svc.format_for_chat(user_input, search_result)
-            except Exception as e:
-                logger.warning(f"搜索失败: {e}")
+        # 5. 回退：无 LLM
+        if not self._llm:
+            reply = "喵~我还没准备好，请稍后再找我聊天哦"
+            self._save_to_archive("assistant", reply)
+            return reply
 
-        # 6. 执行 LLM 调用
+        # 6. LLM 中枢（最多 2 轮工具调用）
         try:
-            if self._llm:
-                combined = memory_texts[:]
-                if search_context:
-                    combined.insert(0, search_context)
-                reply = self._llm.generate(user_input, memories=combined)
-            else:
-                reply = "喵~我还没准备好，请稍后再找我聊天哦"
+            reply, skip_archive = self._llm_loop(user_input, memory_texts)
+            if not skip_archive:
+                self._save_to_archive("assistant", reply)
         except Exception as e:
             logger.exception(f"对话处理异常: {e}")
             reply = "喵...好像出了点问题，让我重新想想~"
+            self._save_to_archive("assistant", reply)
 
-        # 7. 保存回复
-        self._save_to_archive("assistant", reply)
+        # 7. 后处理
+        self._post_process(user_input, reply)
+        logger.info(f"对话回复: {reply[:80]}...")
+        return reply
 
-        # 8. 规则抽取特质并入库
+    # ────────────── LLM 中枢 ──────────────
+
+    _stream_cb: Optional[Callable[[str], None]] = None
+
+    def set_stream_callback(self, cb: Callable[[str], None]) -> None:
+        self._stream_cb = cb
+
+    def _llm_loop(self, user_input: str, memory_texts: List[str]) -> Tuple[str, bool]:
+        """LLM 循环：流式生成 → 检测 tool_call → 执行。
+
+        Returns: (最终回复, skip_archive)。
+        """
+        combined = list(memory_texts)
+        first_input = user_input
+        tool_count = 0
+
+        while tool_count <= MAX_TOOL_CALLS:
+            reply = self._stream_generate(first_input, combined)
+            first_input = ""
+
+            # 检测 tool_call
+            m = TOOL_TAG_RE.search(reply)
+            payload_str = None
+
+            if m:
+                payload_str = m.group(1)
+            else:
+                fm = FALLBACK_JSON_RE.search(reply)
+                if fm:
+                    start = fm.start()
+                    depth, end = 0, start
+                    for i in range(start, len(reply)):
+                        if reply[i] == '{': depth += 1
+                        elif reply[i] == '}':
+                            depth -= 1
+                            if depth == 0: end = i + 1; break
+                    payload_str = reply[start:end]
+
+            if not payload_str:
+                return reply, False
+
+            try:
+                payload = json.loads(payload_str)
+            except json.JSONDecodeError:
+                logger.warning(f"tool_call JSON 解析失败: {payload_str[:100]}")
+                return reply, False
+
+            tool_name = payload.get("tool", "")
+            tool_params = payload.get("params", {})
+            executor = registry.get("tool_executor")
+            if executor is None:
+                return reply, False
+
+            tool_result, is_terminal = executor.execute(tool_name, tool_params)
+            logger.info(f"工具调用: {tool_name} → {'终结' if is_terminal else '中间'}")
+
+            if is_terminal:
+                return tool_result, False
+
+            combined.insert(0, f"[工具结果：{tool_name}]\n{tool_result}")
+            tool_count += 1
+
+        return reply, False
+
+    def _stream_generate(self, user_input: str, memories: List[str]) -> str:
+        """流式生成，边输出边收集全文。"""
+        parts = []
+        try:
+            for chunk in self._llm.generate_stream(user_input, memories=memories):
+                parts.append(chunk)
+                if self._stream_cb:
+                    self._stream_cb(chunk)
+        except Exception as e:
+            logger.warning(f"流式生成异常: {e}")
+            # 降级：非流式
+            return self._llm.generate(user_input, memories=memories)
+        return "".join(parts)
+
+    # ────────────── 记忆 ──────────────
+
+    def _retrieve_memories(self, user_input: str) -> List[str]:
+        if not self._memory_service:
+            return []
+        try:
+            memories = self._memory_service.search(user_input, top_k=3, min_score=0.4)
+            texts = [m["summary"] for m in memories]
+            if texts:
+                bus.publish("CONTEXT_HINT", {"text": f"想起了 {len(texts)} 段相关记忆~"})
+            return texts
+        except Exception as e:
+            logger.warning(f"记忆检索失败: {e}")
+            return []
+
+    # ────────────── 后处理 ──────────────
+
+    def _post_process(self, user_input: str, reply: str) -> None:
+        # 特质抽取
         if self._extractor and self._profile_manager:
             try:
                 candidates = self._extractor.extract_by_rules(user_input)
                 if candidates:
                     self._profile_manager.batch_upsert_traits(candidates)
             except Exception as e:
-                logger.warning(f"特质抽取/入库失败: {e}")
+                logger.warning(f"特质抽取失败: {e}")
 
-        # 9. 喂入 LLM 摘要缓冲区
+        # 摘要缓冲
         if self._extractor:
             try:
                 self._extractor.feed_dialogue(user_input, reply)
             except Exception as e:
                 logger.warning(f"摘要缓冲失败: {e}")
 
-        # 10. 轮次管理
+        # 情绪分析
+        self._analyze_mood(user_input)
+
+        # 轮次管理
         self._turn_count += 1
         if self._turn_count % self._summary_interval == 0:
             self._trigger_summary()
 
-        # 11. 情绪分析
-        self._analyze_mood(user_input)
-
-        logger.info(f"对话回复: {reply[:80]}...")
-        return reply
-
-    # ------------------------------------------------------------------
-    # 存档管理
-    # ------------------------------------------------------------------
+    # ────────────── 存档 & 历史 ──────────────
 
     def _save_to_archive(self, role: str, content: str) -> None:
         try:
@@ -165,14 +225,25 @@ class ChatManager:
             if db is None:
                 return
             db.execute(
-                "INSERT INTO conversation_archive (role, content, tokens_count) VALUES (?, ?, ?)",
+                "INSERT INTO conversation_archive (role, content, tokens_count) "
+                "VALUES (?, ?, ?)",
                 (role, content, len(content) // 2),
             )
             db.commit()
+
+            # 同步写入内存缓存
+            self._history_cache.append({
+                "role": role, "content": content,
+                "timestamp": datetime.now().isoformat(),
+            })
+            if len(self._history_cache) > 100:
+                self._history_cache = self._history_cache[-100:]
         except Exception as e:
-            logger.warning(f"存档保存失败: {e}")
+            logger.warning(f"存档失败: {e}")
 
     def get_history(self, limit: int = 20) -> List[Dict[str, Any]]:
+        if self._history_cache:
+            return self._history_cache[-limit:]
         try:
             db = registry.get("database")
             if db is None:
@@ -181,53 +252,39 @@ class ChatManager:
                 "SELECT msg_id, role, content, timestamp FROM conversation_archive "
                 "ORDER BY msg_id DESC LIMIT ?", (limit,)
             )
-            keys = [d[0] for d in cursor.description]
-            return [dict(zip(keys, row)) for row in cursor.fetchall()]
+            return [dict(zip([d[0] for d in cursor.description], row))
+                    for row in cursor.fetchall()]
         except Exception as e:
             logger.warning(f"获取历史失败: {e}")
             return []
 
-    # ------------------------------------------------------------------
-    # 情绪分析（P2-8 修复：使用 mood_logger 统一词库）
-    # ------------------------------------------------------------------
+    # ────────────── 情绪 ──────────────
 
     def _analyze_mood(self, text: str) -> None:
-        """分析用户情绪，使用 mood_logger 统一词库。"""
         try:
             if self._mood_logger:
-                # 使用 mood_logger 的统一词库和打分逻辑
                 label, intensity = self._mood_logger.analyze(text)
             else:
-                # 回退：内联简化词库
                 label, intensity = self._fallback_mood_analyze(text)
 
             if label == "neutral" and intensity < 0.4:
                 return
 
-            # 存储到数据库
-            try:
-                db = registry.get("database")
-                if db:
-                    db.execute(
-                        "INSERT INTO mood_snapshot (mood_label, intensity, context_summary) "
-                        "VALUES (?, ?, ?)",
-                        (label, intensity, text[:100]),
-                    )
-                    db.commit()
-            except Exception as e:
-                logger.warning(f"情绪记录失败: {e}")
+            db = registry.get("database")
+            if db:
+                db.execute(
+                    "INSERT INTO mood_snapshot (mood_label, intensity, context_summary) "
+                    "VALUES (?, ?, ?)",
+                    (label, intensity, text[:100]),
+                )
+                db.commit()
 
             bus.publish(EVENT_MOOD_DETECTED, {"label": label, "intensity": intensity})
-
-            if label == "negative" and intensity > 0.6:
-                logger.info(f"检测到负面情绪 (强度={intensity:.2f})")
-
         except Exception as e:
             logger.warning(f"情绪分析失败: {e}")
 
     @staticmethod
     def _fallback_mood_analyze(text: str) -> tuple:
-        """回退情绪分析（mood_logger 不可用时）。"""
         positive = ["开心", "高兴", "喜欢", "棒", "好", "谢谢", "赞", "爱",
                      "快乐", "nice", "great", "good", "哈哈", "嘻嘻"]
         negative = ["烦", "累", "不开心", "生气", "讨厌", "难过", "失望",
@@ -241,23 +298,37 @@ class ChatManager:
             return ("negative", min(0.5 + nc * 0.1, 1.0))
         return ("neutral", 0.3)
 
-    # ------------------------------------------------------------------
-    # 记忆摘要
-    # ------------------------------------------------------------------
+    # ────────────── 摘要 ──────────────
 
     def _trigger_summary(self) -> None:
         history = self.get_history(limit=10)
         if not history:
             return
-        summary = self._prompt_builder.summarize_for_storage([
-            {"role": h["role"], "content": h["content"]} for h in history
-        ])
-        if self._memory_service:
-            self._memory_service.add_memory(summary=summary, category="event", importance=5)
+        messages = [{"role": h["role"], "content": h["content"]} for h in history]
 
-    # ------------------------------------------------------------------
-    # 对话管理
-    # ------------------------------------------------------------------
+        # 优先 LLM 提取关键记忆，失败回退模板截断
+        summary = self._prompt_builder.summarize_for_storage(messages)
+        if self._llm and not getattr(self._llm, '_is_degraded', True):
+            try:
+                dialogue_text = "\n".join(
+                    f"{'用户' if m['role']=='user' else 'Vel'}: {m['content'][:100]}"
+                    for m in messages[-6:]
+                )
+                llm_summary = self._llm._call_ollama([
+                    {"role": "system", "content": "用一句简短的话总结这段对话的核心内容。"},
+                    {"role": "user", "content": dialogue_text},
+                ])
+                if llm_summary and len(llm_summary) > 5:
+                    summary = llm_summary.strip()
+            except Exception:
+                pass
+
+        if self._memory_service:
+            self._memory_service.add_memory(
+                summary=summary, category="event", importance=5,
+            )
+
+    # ────────────── 对话管理 ──────────────
 
     def clear_context(self) -> None:
         if self._llm:

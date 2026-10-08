@@ -1,0 +1,54 @@
+# =============================================
+# Vel - 智能AI桌宠 .gitignore
+# 目标：运行时产物、依赖环境、密钥与用户数据一律不入库
+# =============================================
+
+# --- 依赖环境（体积巨大，且平台相关）---
+venv/
+.venv/
+env/
+ENV/
+
+# --- Python 运行时产物 ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- 用户数据与运行时状态（含隐私，绝不入库）---
+data/pet.db
+data/pet.db-wal
+data/pet.db-shm
+data/faiss.index
+data/models/
+data/logs/
+*.log
+
+# --- 密钥与凭据（绝不入库）---
+config/secrets.yaml
+config/secrets.local.yaml
+.env
+.env.*
+*.pem
+*.key
+
+# --- IDE / 编辑器 ---
+.idea/
+.vscode/
+*.swp
+*~
+
+# --- 打包产物 ---
+*.exe
+*.msi
+*.spec.bak
+installer_output/

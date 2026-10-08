@@ -158,14 +158,24 @@ class DrinkReminder:
     def handle_feedback(self, action: str) -> str:
         """处理用户对饮水提醒的反馈。"""
         if action == "drink":
-            self._record_drink(self._cup_size_ml, triggered=True)
             self._today_ml += self._cup_size_ml
             self._last_drink_time = datetime.now()
+            log_id = self._record_drink(self._cup_size_ml, triggered=True)
             remaining = max(0, self._daily_target_ml - self._today_ml)
             if remaining == 0:
                 return f"太棒了！今日饮水目标达成！🎉 ({self._daily_target_ml}ml)"
-            return f"真乖~ 今日已饮 {self._today_ml}ml，还差 {remaining}ml 💧"
 
+            # 发一条5秒可撤回通知
+            bus.publish(EVENT_HEALTH_REMINDER, {
+                "type": "drink_undo",
+                "schedule_id": f"drink_undo_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                "message": f"已记录 {self._cup_size_ml}ml ✓",
+                "priority": 0,
+                "duration_ms": 5000,
+                "buttons": [("↩ 撤回", "undo", "secondary")],
+                "log_id": log_id,
+            })
+            return f"真乖~ 今日已饮 {self._today_ml}ml，还差 {remaining}ml 💧"
         elif action == "skip":
             # P1-8 修复：改为15分钟后重试，而非等下一轮45分钟
             self._postponed = True
@@ -220,17 +230,43 @@ class DrinkReminder:
     # 数据库操作
     # ------------------------------------------------------------------
 
-    def _record_drink(self, amount_ml: int, triggered: bool = False) -> None:
+    def _record_drink(self, amount_ml: int, triggered: bool = False) -> Optional[int]:
+        """记录饮水，返回自增 ID。"""
         try:
             db = registry.get("database")
             if db:
-                db.execute(
+                cursor = db.execute(
                     "INSERT INTO drink_log (amount_ml, triggered_by_reminder) VALUES (?, ?)",
                     (amount_ml, 1 if triggered else 0),
                 )
                 db.commit()
+                return cursor.lastrowid
         except Exception as e:
             logger.warning(f"饮水记录失败: {e}")
+        return None
+
+    def undo_drink(self, log_id: int) -> str:
+        """撤回指定饮水记录。"""
+        try:
+            db = registry.get("database")
+            if db is None:
+                return "撤回失败 😿"
+            # 只允许撤回最近一条
+            cursor = db.execute(
+                "SELECT amount_ml FROM drink_log WHERE id = ? AND date(timestamp) = date('now')",
+                (log_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return "已过期，无法撤回"
+            amount = row[0]
+            db.execute("DELETE FROM drink_log WHERE id = ?", (log_id,))
+            db.commit()
+            self._today_ml = max(0, self._today_ml - amount)
+            return f"已撤回 {amount}ml"
+        except Exception as e:
+            logger.error(f"饮水撤回失败: {e}")
+            return "撤回失败 😿"
 
     def _load_today_drinks(self) -> None:
         try:

@@ -38,7 +38,7 @@ class SystemTray(QSystemTrayIcon):
         self._menu.setStyleSheet(f"""
             QMenu {{ background:{Colors.BG_MAIN}; border:1px solid {Colors.BORDER};
                      border-radius:{6}px; padding:4px; }}
-            QMenu::item {{ padding:6px 20px; font:400 {Fonts.SIZE_SM}px '{Fonts.FAMILY}';
+            QMenu::item {{ padding:6px 20px; font:400 {Fonts.SIZE_SM}px '{Fonts.FAMILY_CUSTOM}', '{Fonts.FAMILY}';
                           color:{Colors.TEXT_PRIMARY}; }}
             QMenu::item:selected {{ background:{Colors.BG_CARD}; }}
             QMenu::separator {{ height:1px; background:{Colors.BORDER}; margin:4px 8px; }}

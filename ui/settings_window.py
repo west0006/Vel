@@ -82,7 +82,7 @@ class SettingsWindow(QDialog):
                       QPushButton {{
                           text-align: left; padding-left: 16px;
                           border: none; border-radius: 0;
-                          font: 400 {Fonts.SIZE_SM}px '{Fonts.FAMILY}';
+                          font: 400 {Fonts.SIZE_SM}px '{Fonts.FAMILY_CUSTOM}', '{Fonts.FAMILY}';
                           color: {Colors.TEXT_SECONDARY};
                           background: transparent;
                       }}
@@ -143,7 +143,7 @@ class SettingsWindow(QDialog):
 
     def _page_profile(self) -> QWidget:
         layout, w = self._page_wrap()
-        layout.addWidget(self._section("个人偏好"))
+        # layout.addWidget(self._section("个人偏好"))
 
         layout.addWidget(QLabel("昵称"))
         self._nick = QLineEdit(self._profile.get_profile("nickname", "用户"))
@@ -199,11 +199,11 @@ class SettingsWindow(QDialog):
 
     def _page_schedule(self) -> QWidget:
         layout, w = self._page_wrap()
-        layout.addWidget(self._section("日程"))
+        # layout.addWidget(self._section("日程"))
         tabs = QTabWidget()
         tabs.setStyleSheet(f"""
             QTabWidget::pane {{ border: 1px solid {Colors.BORDER}; border-radius: {Sizes.CARD_RADIUS}px; background: {Colors.BG_MAIN}; }}
-            QTabBar::tab {{ padding: 8px 20px; border: none; font: 400 {Fonts.SIZE_SM}px '{Fonts.FAMILY}'; color: {Colors.TEXT_SECONDARY}; }}
+            QTabBar::tab {{ padding: 8px 20px; border: none; font: 400 {Fonts.SIZE_SM}px '{Fonts.FAMILY_CUSTOM}', '{Fonts.FAMILY}'; color: {Colors.TEXT_SECONDARY}; }}
             QTabBar::tab:selected {{ color: {Colors.ACCENT}; font-weight: 600; border-bottom: 2px solid {Colors.ACCENT}; }}
         """)
 
@@ -212,10 +212,10 @@ class SettingsWindow(QDialog):
         cal.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)
         cal.setStyleSheet(f"""
             QCalendarWidget {{ background: {Colors.BG_MAIN}; border: none; }}
-            QCalendarWidget QToolButton {{ color: {Colors.TEXT_PRIMARY}; font: 600 {Fonts.SIZE_SM}px '{Fonts.FAMILY}'; border: none; padding: 6px 12px; }}
+            QCalendarWidget QToolButton {{ color: {Colors.TEXT_PRIMARY}; font: 600 {Fonts.SIZE_SM}px '{Fonts.FAMILY_CUSTOM}', '{Fonts.FAMILY}'; border: none; padding: 6px 12px; }}
             QCalendarWidget QToolButton:hover {{ background: {Colors.BG_CARD}; border-radius: 6px; }}
             QCalendarWidget QMenu {{ background: {Colors.BG_MAIN}; border: 1px solid {Colors.BORDER}; border-radius: 8px; }}
-            QCalendarWidget QAbstractItemView:enabled {{ color: {Colors.TEXT_PRIMARY}; font: 400 {Fonts.SIZE_SM}px '{Fonts.FAMILY}'; selection-background-color: {Colors.NAV_ACTIVE}; selection-color: {Colors.ACCENT}; }}
+            QCalendarWidget QAbstractItemView:enabled {{ color: {Colors.TEXT_PRIMARY}; font: 400 {Fonts.SIZE_SM}px '{Fonts.FAMILY_CUSTOM}','{Fonts.FAMILY}'; selection-background-color: {Colors.NAV_ACTIVE}; selection-color: {Colors.ACCENT}; }}
             QCalendarWidget QAbstractItemView:disabled {{ color: {Colors.TEXT_PLACEHOLDER}; }}
             QCalendarWidget QWidget#qt_calendar_navigationbar {{ background: {Colors.BG_CARD}; border-bottom: 1px solid {Colors.BORDER}; }}
         """)
@@ -310,7 +310,7 @@ class SettingsWindow(QDialog):
 
     def _page_health(self) -> QWidget:
         layout, w = self._page_wrap()
-        layout.addWidget(self._section("健康"))
+        # layout.addWidget(self._section("健康"))
 
         g = QGroupBox("今日概览")
         gl = QVBoxLayout(g)
@@ -389,7 +389,7 @@ class SettingsWindow(QDialog):
 
     def _page_habit(self) -> QWidget:
         layout, w = self._page_wrap()
-        layout.addWidget(self._section("习惯孵化"))
+        # layout.addWidget(self._section("习惯孵化"))
         self._habit_list = QListWidget()
         self._habit_list.setStyleSheet(Styles.LIST_WIDGET)
         layout.addWidget(self._habit_list)
@@ -415,7 +415,7 @@ class SettingsWindow(QDialog):
 
     def _page_memo(self) -> QWidget:
         layout, w = self._page_wrap()
-        layout.addWidget(self._section("备忘录"))
+        # layout.addWidget(self._section("备忘录"))
         self._memo_list = QListWidget()
         self._memo_list.setStyleSheet(Styles.LIST_WIDGET)
         layout.addWidget(self._memo_list)
@@ -440,7 +440,7 @@ class SettingsWindow(QDialog):
 
     def _page_chat(self) -> QWidget:
         layout, w = self._page_wrap()
-        layout.addWidget(self._section("对话"))
+        # layout.addWidget(self._section("对话"))
         self._chat_list = QListWidget()
         self._chat_list.setStyleSheet(Styles.LIST_WIDGET)
         layout.addWidget(self._chat_list)
@@ -502,7 +502,7 @@ class SettingsWindow(QDialog):
 
     def _page_appearance(self) -> QWidget:
         layout, w = self._page_wrap()
-        layout.addWidget(self._section("外观"))
+        # layout.addWidget(self._section("外观"))
 
         layout.addWidget(QLabel("猫咪大小"))
         self._size_slider = QSlider(Qt.Horizontal)
@@ -512,7 +512,9 @@ class SettingsWindow(QDialog):
         layout.addWidget(self._size_slider)
 
         layout.addWidget(QPushButton("恢复默认位置", clicked=self._reset_pos))
-        self._anim_cb = QCheckBox("启用动画"); self._anim_cb.setChecked(True)
+        self._anim_cb = QCheckBox("启用动画");
+        self._anim_cb.setChecked(True)
+        self._anim_cb.toggled.connect(self._toggle_animation)
         layout.addWidget(self._anim_cb)
         layout.addWidget(QLabel("主题色（即将推出 🚧）"))
         theme_layout = QHBoxLayout()
@@ -532,8 +534,56 @@ class SettingsWindow(QDialog):
         theme_layout.addStretch()
         layout.addLayout(theme_layout)
         layout.addStretch()
+        layout.addWidget(QLabel("屏幕亮度"))
+        self._brightness_slider = QSlider(Qt.Horizontal)
+        self._brightness_slider.setRange(30, 100)
+        self._brightness_slider.setValue(
+            self._get_int("brightness_pct", 100)
+        )
+        self._brightness_slider.setTickPosition(QSlider.TicksBelow)
+        self._brightness_slider.setTickInterval(10)
+        self._brightness_slider.valueChanged.connect(self._apply_brightness)
+        layout.addWidget(self._brightness_slider)
+
+        brightness_label = QLabel("100%（拖动调整整体亮度）")
+        brightness_label.setStyleSheet(
+            f"{Fonts.style(Fonts.SIZE_XS, 400)} color: {Colors.TEXT_PLACEHOLDER};"
+        )
+        self._brightness_label = brightness_label
+        self._brightness_slider.valueChanged.connect(
+            lambda v: self._brightness_label.setText(f"{v}%")
+        )
+        layout.addWidget(brightness_label)
         return w
 
+    def _toggle_animation(self, enabled: bool) -> None:
+        pet = registry.get("floating_pet")
+        if pet:
+            if enabled:
+                pet._anim_timer.start()
+            else:
+                pet._anim_timer.stop()
+
+    def _apply_brightness(self, pct: int) -> None:
+        """调整全局亮度（通过 opacity 模拟）。"""
+        try:
+            db = registry.get("database")
+            if db:
+                db.execute(
+                    "INSERT OR REPLACE INTO app_settings (key,value) VALUES ('brightness_pct',?)",
+                    (str(pct),),
+                )
+                db.commit()
+            # 调整桌宠和气泡的窗口透明度
+            pet = registry.get("floating_pet")
+            chat = registry.get("chat_bubble")
+            opacity = max(0.3, pct / 100.0)
+            if pet:
+                pet.setWindowOpacity(opacity)
+            if chat:
+                chat.setWindowOpacity(opacity)
+        except Exception:
+            pass
 
     # def _apply_theme(self, color: str) -> None:
     #     """应用主题色（需重启生效的部分仅记录）。"""
@@ -558,7 +608,7 @@ class SettingsWindow(QDialog):
 
     def _page_update(self) -> QWidget:
         layout, w = self._page_wrap()
-        layout.addWidget(self._section("更新"))
+        # layout.addWidget(self._section("更新"))
         layout.addWidget(QLabel("当前版本: v0.1.0-alpha"))
         self._auto_cb = QCheckBox("自动检查更新"); self._auto_cb.setChecked(True)
         layout.addWidget(self._auto_cb)
@@ -570,7 +620,7 @@ class SettingsWindow(QDialog):
 
     def _page_data(self) -> QWidget:
         layout, w = self._page_wrap()
-        layout.addWidget(self._section("数据"))
+        # layout.addWidget(self._section("数据"))
         layout.addWidget(QPushButton("导出对话", clicked=self._export))
         layout.addWidget(QPushButton("备份数据库", clicked=self._backup))
         layout.addWidget(QPushButton("查看日记", clicked=self._view_diary))

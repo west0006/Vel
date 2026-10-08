@@ -62,8 +62,9 @@ class ReminderScheduler:
         self._on_trigger = on_trigger
         self._scheduler.start()
         logger.info("提醒调度器已启动")
+        self._setup_weekly_cleanup()
 
-    # ------------------------------------------------------------------
+        # ------------------------------------------------------------------
     # 注册提醒
     # ------------------------------------------------------------------
 
@@ -386,6 +387,40 @@ class ReminderScheduler:
         except Exception as e:
             logger.warning(f"快照加载失败: {e}")
             return False
+
+    def _setup_weekly_cleanup(self) -> None:
+        """每周日凌晨清理 7 天前已完成的重复实例。"""
+        try:
+            from apscheduler.triggers.cron import CronTrigger
+            self._scheduler.add_job(
+                func=self._cleanup_old_instances,
+                trigger=CronTrigger(day_of_week="sun", hour=3, minute=0),
+                id="schedule_instance_cleanup",
+                replace_existing=True,
+            )
+            logger.info("重复实例清理任务已注册（每周日 03:00）")
+        except Exception as e:
+            logger.warning(f"实例清理任务注册失败: {e}")
+
+    def _cleanup_old_instances(self) -> None:
+        """清理 7 天前已完成/错过的重复实例。"""
+        try:
+            if self._store is None:
+                return
+            db = registry.get("database")
+            if db is None:
+                return
+            cursor = db.execute(
+                "DELETE FROM schedule_instance "
+                "WHERE status IN ('completed','missed') "
+                "AND actual_start < date('now', '-7 days')"
+            )
+            deleted = cursor.rowcount
+            db.commit()
+            if deleted > 0:
+                logger.info(f"已清理 {deleted} 条过期重复实例")
+        except Exception as e:
+            logger.warning(f"实例清理失败: {e}")
 
     def shutdown(self) -> None:
         """关闭调度器。"""

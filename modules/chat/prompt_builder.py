@@ -4,7 +4,7 @@
 负责将用户画像、记忆、对话历史和系统提示拼接为发送给 LLM 的完整消息。
 支持个性化注入，Alpha 版使用规则+数据库键值对简化实现。
 """
-
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from core.service_registry import registry
@@ -63,20 +63,34 @@ class PromptBuilder:
             logger.debug(f"获取用户画像失败: {e}")
             return ""
 
-    def _get_active_traits(self) -> List[str]:
-        """获取活跃的用户特质列表。"""
+    def _get_active_traits(self) -> Dict[str, List[str]]:
+        """获取活跃的用户特质，按 category 分组。"""
         try:
             db = registry.get("database")
             if db is None:
-                return []
+                return {}
             cursor = db.execute(
-                "SELECT trait_name, value FROM user_traits "
-                "WHERE confidence >= 0.6 AND last_active >= date('now', '-60 days')"
+                "SELECT trait_name, value, "
+                "CASE "
+                "  WHEN trait_name LIKE 'prefer_%' OR trait_name LIKE 'dislike_%' OR trait_name LIKE 'restriction_%' THEN 'preference' "
+                "  WHEN trait_name LIKE 'habit_%' THEN 'habit' "
+                "  WHEN trait_name LIKE 'goal_%' OR trait_name LIKE 'identity_%' THEN 'goal' "
+                "  ELSE 'personality' "
+                "END as category "
+                "FROM user_traits "
+                "WHERE confidence >= 0.6 AND last_active >= date('now', '-60 days') "
+                "ORDER BY confidence DESC LIMIT 20"
             )
-            return [f"{row[0]}: {row[1]}" for row in cursor.fetchall()]
+            grouped: Dict[str, List[str]] = {}
+            for row in cursor.fetchall():
+                cat = row[2]
+                if cat not in grouped:
+                    grouped[cat] = []
+                grouped[cat].append(row[1])
+            return grouped
         except Exception as e:
             logger.debug(f"获取用户特质失败: {e}")
-            return []
+            return {}
 
     def _get_time_context(self) -> str:
         """获取时间上下文。"""
@@ -103,39 +117,55 @@ class PromptBuilder:
     # ------------------------------------------------------------------
 
     def build_system_message(self, extra_context: Optional[str] = None) -> Dict[str, str]:
-        """构建系统消息。
-
-        Args:
-            extra_context: 额外的上下文信息（如当前模式、健康状态等）
-
-        Returns:
-            {"role": "system", "content": "..."}
-        """
         parts = [self._system_prompt.replace("{user_name}", self._user_name)]
 
-        # 时间上下文
-        parts.append(f"\n【当前时间】{self._get_time_context()}")
-
-        # 用户画像
         profile = self._get_profile_summary()
         if profile:
             parts.append(f"\n【用户画像】\n{profile}")
 
-        # 用户特质
         traits = self._get_active_traits()
         if traits:
-            parts.append(f"\n【用户偏好】\n" + "\n".join(traits))
+            labels = {
+                "personality": "性格", "preference": "偏好",
+                "habit": "习惯", "goal": "最近在",
+            }
+            lines = [f"【你了解的 {self._user_name}】"]
+            for cat, cat_label in labels.items():
+                if cat in traits:
+                    lines.append(f"{cat_label}：" + "、".join(traits[cat]))
+            parts.append("\n".join(lines))
 
-        # 额外上下文
         if extra_context:
             parts.append(f"\n【附加上下文】{extra_context}")
 
-        # 回复规则
-        parts.append("\n【回复要求】\n"
-                     "- 回复简短自然，不超过150字\n"
-                     "- 使用活泼亲切的猫咪口吻\n"
-                     "- 适当使用\"~\"语气词\n"
-                     "- 如果是情感支持场景，要温柔体贴")
+        # ── 时间参考 ──
+        parts.append("【时间参考】" + datetime.now().strftime("%Y年%m月%d日 %H:%M:%S") +
+                         "，回答\"现在几点\"等时间问题时请严格使用这个时间。")
+
+        # ── 工具协议 ──
+        parts.append("""【重要：工具调用格式】
+
+        需要操作时，你必须只用一行标签回复，标签内外不要有任何额外文字。格式如下：
+
+        <tool_call>{"tool":"工具名","params":{...}}</tool_call>
+
+        可用工具：
+        - create_reminder：创建日程提醒
+          参数：{"tool":"create_reminder","params":{"title":"事件","time":"自然语言时间"}}
+        - create_memo：创建备忘录
+          参数：{"tool":"create_memo","params":{"content":"内容","time":"提醒时间(可选)"}}
+        - query_schedule：查询当日日程
+          参数：{"tool":"query_schedule","params":{"date":"日期(可选)"}}
+        - get_diary：查看日记
+          参数：{"tool":"get_diary","params":{"date":"日期(可选)"}}
+        - search_web：联网搜索（结果会回传供你总结）
+          参数：{"tool":"search_web","params":{"query":"搜索关键词"}}
+
+        规则：
+        - 普通聊天直接回复，不需要工具
+        - 需要操作时使用上述格式，严格按要求
+        - search_web 的结果会回传给你，请基于它生成最终回复
+        - 回复简短自然，不超过150字，猫咪口吻""")
 
         return {"role": "system", "content": "\n".join(parts)}
 

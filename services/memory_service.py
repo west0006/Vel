@@ -122,6 +122,7 @@ class MemoryService:
         self._index = None
         self._id_map: Dict[str, int] = {}
         self._reverse_id_map: Dict[int, str] = {}
+        self._deleted_ids: set = set()  # 待压缩的 dead IDs
         self._lock = threading.Lock()
 
     def _get_db(self):
@@ -256,9 +257,15 @@ class MemoryService:
                 faiss_id = self._id_map.pop(memory_id, None)
                 if faiss_id is not None:
                     self._reverse_id_map.pop(faiss_id, None)
+                    self._deleted_ids.add(faiss_id)
                 conn = self._get_db()
                 conn.execute("DELETE FROM episodic_memory WHERE memory_id=?", (memory_id,))
                 conn.commit()
+
+                # 死向量超过 30% 时触发压缩
+                total = self._index.ntotal if self._index else 0
+                if total > 0 and len(self._deleted_ids) > total * 0.3:
+                    self._compact_index()
 
                 return True
             except Exception as e:
@@ -274,6 +281,61 @@ class MemoryService:
             return count
         except Exception:
             return 0
+
+    def _save_index(self):
+        import faiss
+        faiss.write_index(self._index, self._faiss_path)
+
+    def _compact_index(self) -> None:
+        """重建 FAISS 索引，移除死向量。"""
+        import faiss
+        if self._index is None or not self._deleted_ids:
+            return
+        logger.info(
+            f"FAISS 索引压缩: {len(self._deleted_ids)} 个死向量 / "
+            f"{self._index.ntotal} 总量"
+        )
+        try:
+            # 重建新索引
+            new_index = faiss.IndexFlatIP(self._dimension)
+            new_id_map: Dict[str, int] = {}
+            new_rev: Dict[int, str] = {}
+
+            conn = self._get_db()
+            cursor = conn.execute(
+                "SELECT memory_id, embedding_id FROM episodic_memory "
+                "WHERE embedding_id IS NOT NULL ORDER BY CAST(embedding_id AS INTEGER)"
+            )
+            embeddings = []
+            for memory_id, emb_id in cursor.fetchall():
+                faiss_id = int(emb_id)
+                if faiss_id not in self._deleted_ids:
+                    # 从旧索引取出向量
+                    vec = self._index.reconstruct(faiss_id)
+                    embeddings.append(vec)
+                    new_id = new_index.ntotal + len(embeddings) - 1
+                    new_id_map[memory_id] = new_id
+                    new_rev[new_id] = memory_id
+
+            if embeddings:
+                new_index.add(np.array(embeddings))
+                # 更新 embedding_id
+                for memory_id, new_id in new_id_map.items():
+                    conn.execute(
+                        "UPDATE episodic_memory SET embedding_id = ? WHERE memory_id = ?",
+                        (str(new_id), memory_id),
+                    )
+                conn.commit()
+
+            self._index = new_index
+            self._id_map = new_id_map
+            self._reverse_id_map = new_rev
+            self._deleted_ids.clear()
+            self._save_index()
+
+            logger.info(f"FAISS 索引压缩完成: {new_index.ntotal} 条有效向量")
+        except Exception as e:
+            logger.error(f"索引压缩失败: {e}")
 
     def _save_index(self):
         import faiss

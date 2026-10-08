@@ -11,7 +11,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal, Qt
 
 from utils.logger import get_logger
 
@@ -45,6 +45,7 @@ class EventBus:
         self._ui_subscribers: Dict[str, List[Callable]] = {}
         self._ui_signals: Optional[UiSignals] = None
         self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="eventbus")
+        self._reminder_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="reminder")
         self._lock = threading.RLock()
 
     def _get_ui_signals(self) -> Optional[UiSignals]:
@@ -56,7 +57,9 @@ class EventBus:
             if QApplication.instance() is None:
                 return None
             self._ui_signals = UiSignals()
-            self._ui_signals.event_emitted.connect(self._on_ui_event)
+            self._ui_signals.event_emitted.connect(
+                self._on_ui_event, Qt.QueuedConnection  # ← 强制队列连接
+            )
             return self._ui_signals
         except Exception:
             return None
@@ -131,9 +134,10 @@ class EventBus:
             except Exception:
                 logger.exception(f"同步事件回调异常 (event={event_type})")
 
-        # 3) 异步订阅者
+        # 3) 异步订阅者（提醒事件走独立池）
+        executor = self._reminder_executor if event_type == EVENT_SCHEDULE_ALERT else self._executor
         for cb in async_subs:
-            self._executor.submit(self._safe_async_callback, event_type, cb, data)
+            executor.submit(self._safe_async_callback, event_type, cb, data)
 
     def _safe_async_callback(self, event_type: str, callback: Callable, data: Any) -> None:
         """安全执行异步回调。"""
@@ -144,6 +148,7 @@ class EventBus:
 
     def shutdown(self, wait: bool = True) -> None:
         """关闭事件总线，释放线程池。"""
+        self._reminder_executor.shutdown(wait=wait)
         self._executor.shutdown(wait=wait)
         logger.info("事件总线已关闭")
 

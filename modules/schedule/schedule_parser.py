@@ -64,6 +64,7 @@ class ScheduleParser:
 
     def __init__(self):
         self._llm_service = None
+        self._pending_items: List[ScheduleItem] = []  # 待入库日程，参与冲突检测
 
     def _get_llm(self) -> Any:
         """懒加载 LLM 服务。"""
@@ -317,10 +318,16 @@ class ScheduleParser:
     # 冲突检测
     # ------------------------------------------------------------------
 
+    def add_pending(self, item: ScheduleItem) -> None:
+        self._pending_items.append(item)
+
+    def clear_pending(self) -> None:
+        self._pending_items.clear()
+
     def check_conflict(
         self, items: List[ScheduleItem], existing: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """检测新日程与已有日程的冲突。
+        """检测新日程与已有日程的冲突（含待入库缓存）。
 
         Args:
             items: 新日程列表
@@ -330,6 +337,14 @@ class ScheduleParser:
             冲突列表 [{new_item, existing_item, overlap_type}, ...]
         """
         conflicts = []
+        # 合并待入库项
+        all_existing = list(existing)
+        for pi in self._pending_items:
+            all_existing.append({
+                "title": pi.title,
+                "start_time": pi.start_time.isoformat(),
+                "end_time": pi.end_time.isoformat() if pi.end_time else None,
+            })
         for new_item in items:
             new_start = new_item.start_time
             new_end = new_item.end_time or new_start + timedelta(hours=1)
