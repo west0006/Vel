@@ -149,9 +149,15 @@ class MemoryService:
         if ollama._check():
             self._encoder = ollama
             return
-        # 回退 sentence-transformers
+        # 回退 sentence-transformers（模型名来自配置，对应 settings.yaml 的 memory.embedding_model）
         logger.warning("Ollama 嵌入不可用，回退到 sentence-transformers")
-        self._encoder = SentenceTransformerEmbedder()
+        from core.config import config
+
+        self._encoder = SentenceTransformerEmbedder(
+            model_name=config.get_str(
+                "memory.embedding_model", "paraphrase-multilingual-MiniLM-L12-v2"
+            )
+        )
         self._encoder._load()
 
     def _load_or_create_index(self) -> None:

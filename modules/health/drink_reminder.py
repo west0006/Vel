@@ -59,8 +59,8 @@ class DrinkReminder:
 
     def initialize(self, callback: Optional[Callable] = None) -> None:
         """初始化饮水提醒器。"""
-        self._interval_min = self._get_setting_int("drink_interval_min", 45)
-        self._daily_target_ml = self._get_setting_int("drink_daily_target_ml", 2000)
+        self._interval_min = self._get_setting_int("health.drink_interval_min", 45)
+        self._daily_target_ml = self._get_setting_int("health.drink_target_ml", 2000)
         self._state_manager = registry.get("state_manager")
         self._callback = callback
 
@@ -283,15 +283,14 @@ class DrinkReminder:
             logger.warning(f"加载饮水记录失败: {e}")
 
     def _get_setting_int(self, key: str, default: int) -> int:
-        try:
-            db = registry.get("database")
-            if db is None:
-                return default
-            cursor = db.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
-            row = cursor.fetchone()
-            return int(row[0]) if row else default
-        except Exception:
-            return default
+        """读取整型配置。
+
+        统一走 core.config：app_settings（用户修改）覆盖 config/settings.yaml（出厂默认）。
+        key 使用规范键名（如 health.drink_target_ml），历史键名由 config 内部别名兼容。
+        """
+        from core.config import config
+
+        return config.get_int(key, default)
 
     # ------------------------------------------------------------------
     # 查询

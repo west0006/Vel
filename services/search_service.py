@@ -41,10 +41,12 @@ class SearchService:
     ]
 
     def __init__(self):
+        from core.config import config
+
         self._bing_key = ""
         self._bing_endpoint = "https://api.bing.microsoft.com/v7.0/search"
-        self._bing_timeout = 5
-        self._bing_monthly_limit = 900
+        self._bing_timeout = config.get_int("search.bing_timeout", 5)
+        self._bing_monthly_limit = config.get_int("search.bing_monthly_limit", 900)
 
         self._searxng_url = "http://localhost:8080/search"
         self._duckduckgo_url = "https://html.duckduckgo.com/html/"

@@ -22,6 +22,7 @@ from core.event_bus import (
 )
 from core.state_manager import StateManager
 from core.service_registry import registry
+from core.config import config
 from ui.floating_pet import FloatingPet
 from ui.chat_bubble import ChatBubble
 from ui.system_tray import SystemTray
@@ -95,6 +96,9 @@ class VelApplication:
 
         registry.register("database", conn)
         self._db_conn = conn
+
+        # 绑定统一配置：app_settings（用户修改）覆盖 config/settings.yaml（出厂默认）
+        config.bind_db(conn)
 
     def _init_fonts(self) -> None:
         """加载项目自带字体。失败不阻塞启动。"""
@@ -313,7 +317,17 @@ class VelApplication:
         # LLM 初始化
         try:
             from services.llm_service import LLMService
-            self._llm_service = LLMService(model="qwen2.5:7b", timeout=60, max_tokens=512)
+            # 参数全部来自 config（app_settings 覆盖 config/settings.yaml）
+            self._llm_service = LLMService(
+                model=config.get_str("llm.model", "qwen2.5:7b-instruct-q4_K_M"),
+                host=config.get_str("llm.host", "127.0.0.1"),
+                port=config.get_int("llm.port", 11434),
+                timeout=config.get_int("llm.timeout", 60),
+                max_tokens=config.get_int("llm.max_tokens", 512),
+                temperature=config.get_float("llm.temperature", 0.7),
+                context_window=config.get_int("llm.context_window", 10),
+                fallback_replies=config.section("llm").get("fallback_replies"),
+            )
             registry.register("llm_service", self._llm_service)
             ok, msg = self._llm_service.check_connection()
             if ok:
@@ -341,8 +355,11 @@ class VelApplication:
             try:
                 from services.memory_service import MemoryService
                 ms = MemoryService(
-                    db_path=str(PROJECT_ROOT / "data" / "pet.db"),
-                    faiss_path=str(PROJECT_ROOT / "data" / "faiss.index"),
+                    db_path=str(PROJECT_ROOT / config.get_str("db.path", "data/pet.db")),
+                    faiss_path=str(
+                        PROJECT_ROOT
+                        / config.get_str("memory.faiss_index_path", "data/faiss.index")
+                    ),
                 )
                 ms.initialize()
                 registry.register("memory_service", ms)

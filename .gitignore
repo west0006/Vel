@@ -41,11 +41,15 @@ config/secrets.local.yaml
 *.pem
 *.key
 
-# --- IDE / 编辑器 ---
+# --- IDE / 编辑器 / 工具目录 ---
 .idea/
 .vscode/
+.reasonix/
 *.swp
 *~
+
+# --- 本地素材（保留在磁盘，不纳入版本管理）---
+ui/resources/animations/cat_1.png
 
 # --- 打包产物 ---
 *.exe

@@ -114,7 +114,11 @@ ui/  ──►  modules/  ──►  services/  ──►  core/  ──►  uti
    - 统一 WAL 模式连接；
    - 敏感字段（`user_profile.value`、`episodic_memory.summary`）读写必须经 `utils/crypto.py`；
    - 表结构变更必须留 migration SQL。
-6. **配置**：默认值放 `config/`；用户修改写 `app_settings` 表；密钥放 `config/secrets.yaml`（**绝不进 git**，首次配置从 `config/secrets.example.yaml` 复制）。缺少 `secrets.yaml` 时相关服务自动降级（位置服务不可用 / 搜索走 DuckDuckGo），**不会崩溃**。
+6. **配置**：统一入口为 `core/config.py` 的 `config` 单例，优先级 **`app_settings` 表（用户修改） > `config/settings.yaml`（出厂默认） > 调用方传入的兜底值**。键名使用 yaml 的点号路径（如 `llm.timeout`、`health.drink_target_ml`），历史键名由模块内别名表兼容。
+   - 读：`config.get_int("llm.timeout", 60)` / `get_str` / `get_bool` / `get_float` / `section("llm")`
+   - 写：`config.set("llm.timeout", 90)` —— 唯一落点是 `app_settings` 表
+   - **新增可配置项时必须同时**：① 在 `config/settings.yaml` 写默认值；② 在 `tests/unit/test_config.py` 补用例
+7. **密钥**：放 `config/secrets.yaml`（**绝不进 git**，首次配置从 `config/secrets.example.yaml` 复制）。缺少该文件时相关服务自动降级（位置服务不可用 / 搜索走 DuckDuckGo），**不会崩溃**。
 
 ---
 

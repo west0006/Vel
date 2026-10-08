@@ -10,9 +10,11 @@
 
 **动画路线已定案**：形象固定为**像素猫** → 采用 **SVG 部件分层 + 代码程序驱动**，不引入 Live2D/OpenGL、不做 Lottie。
 
+**配置体系已接线**（2026-10-08）：新增 `core/config.py` 统一入口，优先级 `app_settings`（用户修改）> `config/settings.yaml`（出厂默认）> 代码兜底 —— `settings.yaml` 从此**真正生效**（此前是死配置）。
+
 下一步是 P2 交互增强三件套（随机微动作 / 视线跟随 / 抚摸反馈），它们共用这条动画路线，也是待办里唯一成组的前置依赖。
 
-⚠️ **但存在两个 P1 级阻断**（见 §四 V0003 / V0004）：`config/settings.yaml` 从未被代码读取，且 Ollama 中没有任何模型 —— **LLM 对话当前实际不可用**。开工 P3 系列（LLM 渗透）前必须先解决。
+⚠️ **仍有一个 P1 阻断**（见 §四 V0004）：Ollama 中没有模型 → **LLM 对话实际不可用**。该问题已由用户认领自行处理（修正环境变量 + pull 模型）；开工 P3 系列（LLM 渗透）前需先解决。
 
 ---
 
@@ -83,20 +85,21 @@
 | # | 问题 | 严重度 | 状态 |
 |---|---|---|---|
 | 1 | 动画资源脏目录 `pet_lottie'` | P2 | ✅ 已修复（删除空目录） |
-| 2 | 仓库无 `.gitignore`，38522 个跟踪文件含 `venv/` `__pycache__` `pet.db` `build/` | P2 | ✅ 已修复（→ 158 个跟踪文件，磁盘文件保留） |
-| 3 | **`config/settings.yaml` 从未被代码读取**（grep 零命中），模型/超时/记忆/健康/日程/搜索/睡眠全部为死配置；实际生效值硬编码在 `main.py:316` | **P1** | ⚠️ 待确认（需配置加载模块，属功能开发） |
-| 4 | **Ollama 中无任何模型**；`OLLAMA_MODELS` 指向不存在的 `E:\dev\ollama\modals`（疑为 `models` 拼写错误）→ LLM 对话实际不可用 | **P1** | ⚠️ 待确认（环境问题） |
+| 2 | 仓库无 `.gitignore`，38522 个跟踪文件含 `venv/` `__pycache__` `pet.db` `build/` | P2 | ✅ 已修复（→ 159 个跟踪文件，磁盘文件保留） |
+| 3 | `config/settings.yaml` 从未被代码读取 + 配置源分裂（`app_settings` 生效 / yaml 不生效 / 键名两套 / 模型名四处不一致） | **P1** | ✅ 已修复（新增 `core/config.py` 统一入口，接入 `main.py` + 4 个 service + 2 个 health 模块） |
+| 4 | **Ollama 中无任何模型**；`OLLAMA_MODELS` 指向不存在的 `E:\dev\ollama\modals`（疑为 `models` 拼写错误）→ LLM 对话实际不可用 | **P1** | ⏸ 用户自理（修正环境变量 + pull 模型） |
 | 5 | `config/secrets.yaml` 真实 key 曾入库 | P3 | ✅ 已修复（用户已删 key + 已解绑 + 新增模板） |
-| 6 | `tests/integration/` 为空 | — | 待补齐 |
-| 7 | `llm_service.py` 内默认模型名与 `main.py`、`settings.yaml` 三者口径不一 | P3 | 待随 V0003 一并统一 |
+| 6 | `cat_1.png`（1.25MB 孤立素材）入库 | P3 | ✅ 已修复（解绑 + `.gitignore`，磁盘保留） |
+| 7 | `tests/integration/` 为空 | — | 待补齐 |
+| 8 | `llm_service.py` 默认模型名与配置口径不一 | P3 | ✅ 已修复（`main.py` 改读 `llm.model`，口径统一到 `settings.yaml`） |
+| 9 | `schedule.*` / `window.*` / `memory.decay_half_life_days` / `memory.summary_interval` 尚未接入统一配置 | P3 | 待第二批接入 |
 
 ---
 
 ## 五、待决策事项（**需用户拍板**）
 
 1. **点击穿透实现路线**：整窗穿透 + 右键守卫（约 1 小时）／ `WM_NCHITTEST` 逐像素命中（约 1 天，工业标准）。分析见 `dev/方案-点击穿透E11.md`。
-2. **V0003 配置体系的处理方式**：实现配置加载模块（让 `settings.yaml` 真正生效）／ 还是反向删除该文件、把参数集中在代码里？
-3. **V0004 模型口径**：确认 `OLLAMA_MODELS` 正确路径并 pull 哪个模型（`qwen2.5:7b` 与 `qwen2.5:7b-instruct-q4_K_M` 二选一），据此统一 `main.py` 与文档口径。
+2. **第二批配置接入范围**：`schedule.*` / `window.*` / `memory.decay_half_life_days` / `memory.summary_interval` 是否随下一个模块一并接入。（配置体系本身已定案，见 §六 D-002）
 
 ---
 
@@ -114,13 +117,25 @@
 
 > 完整的路线对比与实施要点见 `dev/方案-动画与气泡系统设计笔记.md`。
 
+### D-002 · 配置体系接线（2026-10-08 定案）
+
+| 项 | 结论 |
+|---|---|
+| **统一入口** | `core/config.py` 的 `config` 单例 |
+| **优先级** | `app_settings` 表（用户修改） > `config/settings.yaml`（出厂默认） > 调用方传入的兜底值 |
+| **键名规范** | yaml 的点号路径（`llm.timeout`、`health.drink_target_ml`）；历史键名由 `_DB_KEY_ALIASES` 别名表兼容 |
+| **写入落点** | 仅 `app_settings`（`config.set()` 同步双写规范键与别名） |
+| **随附决策** | `llm.max_tokens` 固化 **512**（待办 O3：回复限 150 字内，提速约 40%）；`llm.timeout` 放宽至 **60**（冷启动首次请求会触发模型加载） |
+| **模型口径** | 统一到 `settings.yaml` 的 `qwen2.5:7b-instruct-q4_K_M`（`main.py` 不再硬编码） |
+| **决策依据** | 用户选择"实现配置加载模块"而非删除配置文件；`settings.yaml` 是设计文档声明的权威默认值来源 |
+| **验收** | 新增 `tests/unit/test_config.py` 24 项；全量 `pytest tests -q` → 66 passed |
+
 ---
 
 ## 七、当前阻塞
 
-**两个 P1 阻断（需用户处置，非 Agent 可自行解决）**：
+**一个 P1 阻断（需用户处置，非 Agent 可自行解决）**：
 
-1. **V0004**：环境变量 `OLLAMA_MODELS` 路径错误 + 无模型 → LLM 不可用。**用户需在环境侧修正并 pull 模型。**
-2. **V0003**：配置体系未接线 → 需先定案"实现加载器"还是"删除配置文件"。
+1. **V0004**：环境变量 `OLLAMA_MODELS` 路径错误 + 无模型 → LLM 不可用。用户已声明自行处理（修正环境变量并 `ollama pull qwen2.5:7b-instruct-q4_K_M`）。
 
-**可自主推进的**：全部 P2 动画/交互项（路线已定）、E11 点击穿透（方案已出）、O1/O2/O4 性能项。
+**可自主推进的**：全部 P2 动画/交互项（路线已定）、E11 点击穿透（方案已出）、O1/O2/O4 性能项、第二批配置接入。

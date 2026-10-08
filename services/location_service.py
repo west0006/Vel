@@ -31,6 +31,8 @@ class LocationService:
     """
 
     def __init__(self, api_key: str = ""):
+        from core.config import config
+
         self._api_key = api_key or self._load_api_key()
         self._base_url = "https://restapi.amap.com/v3"
         self._timeout = 5
@@ -38,12 +40,14 @@ class LocationService:
         # 缓存
         self._location_cache: Optional[Dict[str, Any]] = None
         self._location_cache_time: Optional[datetime] = None
-        self._location_cache_ttl_hours = 4
+        # 缓存（配置单位是秒，此处按小时使用：search.cache_ttl_location）
+        ttl_seconds = config.get_int("search.cache_ttl_location", 14400)
+        self._location_cache_ttl_hours = max(1, ttl_seconds // 3600)
 
         # 用量统计
         self._daily_count = 0
         self._daily_date = ""
-        self._daily_limit = 4500
+        self._daily_limit = config.get_int("search.gaode_daily_limit", 4500)
 
     @staticmethod
     def _config_path() -> str:

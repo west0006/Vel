@@ -86,7 +86,7 @@ class SedentaryMonitor:
         self._callback = callback
 
         # 从数据库读取阈值
-        self._threshold_min = self._get_setting_int("sedentary_threshold_min", 50)
+        self._threshold_min = self._get_setting_int("health.sedentary_threshold_min", 50)
 
         # 每周一重置阈值
         self._setup_weekly_reset()
@@ -321,22 +321,20 @@ class SedentaryMonitor:
 
     def _weekly_reset(self) -> None:
         """每周一重置阈值。"""
-        default = self._get_setting_int("sedentary_threshold_min", 50)
+        default = self._get_setting_int("health.sedentary_threshold_min", 50)
         self._threshold_min = default
         self._recent_feedbacks.clear()
         logger.info(f"阈值每周重置: {default}min")
 
     def _get_setting_int(self, key: str, default: int) -> int:
-        """从 app_settings 读取配置。"""
-        try:
-            db = registry.get("database")
-            if db:
-                cursor = db.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
-                row = cursor.fetchone()
-                return int(row[0]) if row else default
-        except Exception:
-            pass
-        return default
+        """读取整型配置。
+
+        统一走 core.config：app_settings（用户修改）覆盖 config/settings.yaml（出厂默认）。
+        key 使用规范键名（如 health.sedentary_threshold_min）。
+        """
+        from core.config import config
+
+        return config.get_int(key, default)
 
     # ------------------------------------------------------------------
     # 查询

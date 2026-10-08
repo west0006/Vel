@@ -15,8 +15,8 @@ llm:
   model: "qwen2.5:7b-instruct-q4_K_M"
   host: "127.0.0.1"
   port: 11434
-  timeout: 30
-  max_tokens: 2048
+  timeout: 60       # 冷启动首次请求会触发模型加载，放宽到 60s
+  max_tokens: 512   # 回复限 150 字内，512 足够；对应待办 O3（提速约 40%）
   temperature: 0.7
   context_window: 10  # 对话滑动窗口轮数
   fallback_replies:
