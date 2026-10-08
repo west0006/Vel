@@ -38,6 +38,7 @@ Windows 10/11 x64 单人内测的拟人化猫系 AI 桌宠。提供长期记忆�
 | OCR | PaddleOCR（GPU）+ Tesseract 备用 | `services/ocr_service.py` |
 | 位置 / 搜索 | 高德 API（免费层）/ Bing → SearXNG → DuckDuckGo 降级链 | `services/location_service.py`、`services/search_service.py` |
 | 打包 | PyInstaller + 启动器式更新 | `build.spec`、`services/update_service.py` |
+| 桌宠形象/动画 | **像素猫** + SVG 部件分层程序动画（**不引入 Live2D/OpenGL，不做 Lottie、不做骨骼动画**） | `ui/floating_pet.py`、`ui/resources/animations/pet_svg/` |
 
 模型名以 `config/settings.yaml` 为准；代码内默认值（如 `llm_service.py` 的 `model` 参数）**只是兜底，不得作为依据**。
 
@@ -113,7 +114,7 @@ ui/  ──►  modules/  ──►  services/  ──►  core/  ──►  uti
    - 统一 WAL 模式连接；
    - 敏感字段（`user_profile.value`、`episodic_memory.summary`）读写必须经 `utils/crypto.py`；
    - 表结构变更必须留 migration SQL。
-6. **配置**：默认值放 `config/`；用户修改写 `app_settings` 表；密钥放 `config/secrets.yaml`（**绝不进 git**）。
+6. **配置**：默认值放 `config/`；用户修改写 `app_settings` 表；密钥放 `config/secrets.yaml`（**绝不进 git**，首次配置从 `config/secrets.example.yaml` 复制）。缺少 `secrets.yaml` 时相关服务自动降级（位置服务不可用 / 搜索走 DuckDuckGo），**不会崩溃**。
 
 ---
 
@@ -155,7 +156,7 @@ ui/  ──►  modules/  ──►  services/  ──►  core/  ──►  uti
   - 语音识别、TTS 仅保留接口，UI 不露出；
   - OCR 仅用灰度化 + 缩放，高级预处理默认关闭；
   - 个性化引擎先用规则 + SQLite 键值对，暂不启用高级检索；
-  - 桌宠动画用帧序列 + QTimer 切换，不做骨骼动画。
+  - 桌宠形象固定为**像素猫**；动画采用 **SVG 部件分层 + 代码程序驱动**（`body/ears/tail/eyes` 四层 + `QPropertyAnimation` + `QTimer`），**不引入 Live2D/OpenGL**、不做 Lottie、不做骨骼动画。详见 `doc/CURRENT-STATUS.md` §六 决策记录 D-001。
 
 ---
 
