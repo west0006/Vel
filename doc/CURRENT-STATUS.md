@@ -16,7 +16,7 @@
 
 ✅ **无环境阻断**：LLM 对话已由用户实测通过。此前记录的 V0004（"无可用模型"）已**撤回** —— 模型存放于移动硬盘，`ollama list` 为空只是未挂载所致（教训见 `testing/buglist.md` V0004）。
 
-**当前唯一的技术卡点就是动画**（用户 2026-10-08 确认）；其余为 2.0 冲刺清单中的可优化点与后续待办。
+**当前唯一的技术卡点就是动画**（用户 2026-10-08 确认）；其余待办见 `dev/计划-当前待办.md` —— 经代码核实**仅 3 项未完成**。
 
 ---
 
@@ -40,7 +40,7 @@
 ### 2.3 业务模块
 
 `modules/`：
-- `chat/`（对话编排 + 人格提示词构建，**已含流式生成骨架** `generate_stream` / `set_stream_callback`）
+- `chat/`（对话编排 + 人格提示词构建；**流式已完整接线**：`generate_stream` → `set_stream_callback` → `chat_bubble.stream_append`）
 - `schedule/`（解析 · 重复规则 · 调度 · 存储，解析器有单测）
 - `health/`（饮水 · 久坐 · 用餐 · 睡眠 · 情绪记录，情绪有单测）
 - `personality/`（抽取 · 遗忘曲线 · 档案管理）
@@ -58,29 +58,38 @@
 
 ---
 
-## 三、待办清单（来源：`dev/计划-2.0冲刺待办清单.md`）
+## 三、待办清单
 
-| 编号 | 项 | 现状判定 |
+> **来源**：`dev/计划-当前待办.md`（**已按 2026-10-08 逐项代码核实重写**）
+> 原《2.0 冲刺待办清单》15 项经核实 **13 项已实现**，已移入 `归档/`（含失真教训记录）。
+
+### 3.1 真实未完成（3 项）
+
+| 编号 | 项 | 现状 |
 |---|---|---|
-| P1-1 | 隐式特质抽取（每 5 轮 LLM 抽取） | 未开始（依赖 V0004 修好） |
-| P1-2 | 画像结构化按类分组显示 | 未开始 |
-| **P2-1** | **idle 随机微动作** | **未开始 — 路线已定，可开工** |
-| P2-2 | 鼠标视线跟随 | 未开始 — 路线已定，可开工 |
-| P2-3 | 抚摸反馈（hover > 2s → happy） | 未开始 — 路线已定，可开工 |
-| P3-1 | LLM 生成日记 | 未开始（依赖 V0004） |
-| P3-2 | LLM 健康贴士 | 未开始（依赖 V0004） |
-| P3-3 | 记忆存储前 LLM 提取关键信息 | 未开始（依赖 V0004） |
-| E5 | 流式对话输出 | ⚠️ **代码已含流式骨架**，待真机确认是否已达"≤200ms 首字" |
-| E11 | 点击穿透 | 未开始（无 `setMask` / `WS_EX_TRANSPARENT`）；方案见 `dev/方案-点击穿透E11.md` |
-| E16 | 冲突检测缓存（待确认日程参与计算） | 未开始 |
-| O1 | FAISS 死向量压缩 | 未开始 |
-| O2 | 对话存档 LRU 缓存 | 未开始 |
-| **O3** | 上下文 token 控制 | ⚠️ **已部分实现**：`main.py:316` 硬编码 `max_tokens=512`（原清单标"未开始"有误） |
-| O4 | 启动加载并行化 | 未开始 |
+| **P1-2** | 画像结构化显示（按 category 分组 + 段落） | 未实现：现状为 `[category] 摘要 (重要性)` 逐行列表 |
+| **E11-os** | **OS 级**点击穿透 | 未实现：Qt 层已有 alpha 逐像素命中 + `e.ignore()`（`_is_click_on_body`）；代码中无 `WS_EX_TRANSPARENT`。**待决策走哪条路线** |
+| **CFG-2** | 第二批配置接入（`schedule.*` / `window.*` / `memory.decay_half_life_days` / `summary_interval`） | 未实现：仍走代码内默认值 |
 
-**编号含义**：`P1` 个性化 · `P2` 交互 · `P3` LLM 渗透 · `E` 1.1 遗留 · `O` 性能优化。
+### 3.2 已完成（原清单项，逐一经代码核实）
 
----
+| 编号 | 项 | 已实现的证据 |
+|---|---|---|
+| P1-1 | 隐式特质抽取 | `modules/personality/extractor.py` 三层架构（规则 + LLM 摘要层；`_trigger_llm_summary`，按轮数阈值触发） |
+| P2-1 | 随机微动作 | `floating_pet._do_micro_action`（本轮改为 `pet_conf.json` 权重表驱动，4 个动作） |
+| P2-2 | 鼠标视线跟随 | `floating_pet._track_mouse` + `compute_track_offset`（本轮修复限幅 bug） |
+| P2-3 | 抚摸反馈 | `floating_pet._on_petted`（hover 1.5s → happy + "呼噜呼噜~"） |
+| P3-1 | LLM 日记 | `modules/diary.py:32`（优先 LLM，失败回退模板；含 `_llm_diary`） |
+| P3-2 | LLM 健康贴士 | `modules/health/meal_engine.py:122/321`（饮食推荐后追加一句健康小贴士） |
+| P3-3 | 记忆 LLM 提取 | `modules/chat/chat_manager.py:318`（先让 LLM"用一句简短的话总结这段对话的核心内容"，再 `add_memory`） |
+| E5 | 流式对话 | `main.py:545` `set_stream_callback` + `stream_append` / `stream_finish`；`chat_bubble` 有打字机接口 |
+| E16 | 冲突检测缓存 | `modules/schedule/schedule_parser.py:67` `_pending_items`（注释："待入库日程，参与冲突检测"）+ `add_pending` / `clear_pending` |
+| O1 | FAISS 死向量压缩 | `services/memory_service.py` `_deleted_ids` + 死向量 >30% 触发压缩 + `_rebuild_index` |
+| O2 | 对话存档 LRU | `modules/chat/chat_manager.py:36` `_history_cache`（内存缓存最近 100 条） |
+| O3 | 上下文 token 控制 | `max_tokens=512`（本轮已从硬编码改为 `settings.yaml` 配置项 `llm.max_tokens`） |
+| O4 | 启动加载并行化 | `main.py` 三处守护线程：LLM 预热 / 记忆初始化 / 消息处理 |
+
+**编号含义**：`P1` 个性化 · `P2` 交互 · `P3` LLM 渗透 · `E` 1.1 遗留 · `O` 性能优化 · `CFG` 配置类。
 
 ## 四、已知问题（详见 `testing/buglist.md`）
 
