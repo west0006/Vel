@@ -3,6 +3,8 @@
 帧目录: ui/resources/animations/pet_svg/
 """
 
+import json
+import math
 import os
 import random
 import xml.etree.ElementTree as ET
@@ -11,6 +13,7 @@ from PyQt5.QtGui import QPainter, QPixmap, QMouseEvent, QCursor, QBitmap
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QWidget, QLabel, QApplication
 
+from ui.pet_fx import PetEffects
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -87,6 +90,98 @@ def _load_frames(state: str) -> list:
     return frames
 
 
+def compute_track_offset(mouse_x: float, mouse_y: float, size: int,
+                         max_offset: float = 3.0,
+                         radius: float = 220.0) -> tuple:
+    """计算鼠标视线跟随的渲染偏移量。
+
+    模块级纯函数（便于单元测试，不依赖任何 Qt 对象）。
+
+    Args:
+        mouse_x: 鼠标在窗口内的 x 坐标。
+        mouse_y: 鼠标在窗口内的 y 坐标。
+        size: 窗口边长（逻辑像素）。
+        max_offset: 单轴最大偏移量（像素）。
+        radius: 有效跟随半径（像素）；超出则偏移归零。
+
+    Returns:
+        ``(tx, ty)`` 浮点偏移量，两轴均被限制在 ``±max_offset`` 内。
+    """
+    center = size / 2.0
+    dx, dy = mouse_x - center, mouse_y - center
+    if (dx * dx + dy * dy) ** 0.5 > radius:
+        return (0.0, 0.0)
+    # 归一化到 [-1, 1] 后限幅，保证偏移不会随鼠标距离无限增长
+    tx = max(-1.0, min(1.0, dx / center)) * max_offset
+    ty = max(-1.0, min(1.0, dy / center)) * max_offset
+    return (tx, ty)
+
+
+#: 微动作配置文件（数据驱动，改 JSON 即可增删动作）
+MICRO_CONF_PATH = os.path.join(os.path.dirname(__file__), "resources", "pet_conf.json")
+#: 支持的情绪名（与 ui/resources/animations/pet_svg/ 下的帧目录一一对应）
+KNOWN_EMOTIONS = ("idle", "wake", "thinking", "sleep",
+                  "sad", "happy", "alert", "collapsed")
+#: 配置缺失时的兜底动作表（动作名, 权重）
+DEFAULT_MICRO_ACTIONS = (("alert", 0.6), ("wake", 0.3), ("happy", 0.6))
+#: 配置缺失时的兜底间隔范围（毫秒）
+DEFAULT_MICRO_INTERVAL = (15000, 35000)
+
+
+def weighted_pick(actions) -> "str | None":
+    """按权重抽签选出一个动作名。
+
+    设计借鉴 DyberPet 的 `random_act.act_prob` 权重表（仅借鉴设计，未复制代码）。
+
+    Args:
+        actions: ``(动作名, 权重)`` 序列；权重 ``<= 0`` 的项会被忽略。
+
+    Returns:
+        选中的动作名；无有效候选时返回 ``None``。
+    """
+    candidates = [(name, weight) for name, weight in actions if weight > 0]
+    if not candidates:
+        return None
+    names = [name for name, _ in candidates]
+    weights = [weight for _, weight in candidates]
+    return random.choices(names, weights=weights, k=1)[0]
+
+
+def _load_micro_config():
+    """读取 ``ui/resources/pet_conf.json`` 的微动作配置。
+
+    Returns:
+        ``(动作权重表, (最小间隔ms, 最大间隔ms), 是否启用)``；
+        文件缺失、JSON 损坏或字段类型错误时一律回退默认值（不抛异常）。
+    """
+    actions = list(DEFAULT_MICRO_ACTIONS)
+    interval = DEFAULT_MICRO_INTERVAL
+    enabled = True
+    try:
+        if os.path.exists(MICRO_CONF_PATH):
+            with open(MICRO_CONF_PATH, "r", encoding="utf-8") as fp:
+                conf = json.load(fp)
+            if not isinstance(conf, dict):
+                logger.warning("pet_conf.json 顶层不是对象，使用默认微动作配置")
+                return actions, interval, enabled
+            enabled = bool(conf.get("micro_actions_enabled", True))
+            loaded = []
+            for item in conf.get("micro_actions", []):
+                if not isinstance(item, dict):
+                    continue
+                weight = float(item.get("act_prob", 1.0))
+                for act in item.get("act_list", []):
+                    loaded.append((str(act), weight))
+            if loaded:
+                actions = loaded
+            low = int(conf.get("idle_min_interval_ms", interval[0]))
+            high = int(conf.get("idle_max_interval_ms", interval[1]))
+            interval = (low, max(low, high))
+    except Exception:
+        logger.exception("读取 pet_conf.json 失败，使用默认微动作配置")
+    return actions, interval, enabled
+
+
 class FloatingPet(QWidget):
     clicked = pyqtSignal()
     drag_finished = pyqtSignal(int, int)
@@ -100,8 +195,7 @@ class FloatingPet(QWidget):
         self._after = "idle"
 
         self._frames_cache = {}
-        for state in ("idle", "wake", "thinking", "sleep",
-                       "sad", "happy", "alert", "collapsed"):
+        for state in KNOWN_EMOTIONS:
             frames = _load_frames(state)
             if frames:
                 self._frames_cache[state] = frames
@@ -115,6 +209,9 @@ class FloatingPet(QWidget):
         self._setup_edge_hide()
         self._setup_animation()
         self._setup_interaction()
+
+        # 程序化特效层（Zzz / 爱心 / 汗滴…），纯 QPainter 绘制，不依赖素材
+        self._fx = PetEffects(self._emotion)
 
         self._tip_label = QLabel(self)
         self._tip_label.setAlignment(Qt.AlignCenter)
@@ -163,6 +260,13 @@ class FloatingPet(QWidget):
         "sad": 120, "happy": 100, "alert": 100, "collapsed": 200,
     }
 
+    # 呼吸形变：周期（秒）与幅度（±1.6%）
+    BREATH_PERIOD = 3.5
+    BREATH_AMPLITUDE = 0.016
+    # 情绪切换时的淡入时长（秒）。注意：帧间不做淡化 —— 帧间隔仅 100~200ms，
+    # 每帧淡化会让相邻两帧永久叠加成像（画面发糊）；像素动画的标准做法是直接切帧。
+    EMOTION_FADE_TIME = 0.18
+
     def _setup_animation(self) -> None:
         self._anim_timer = QTimer()
         self._anim_timer.setInterval(100)
@@ -170,12 +274,16 @@ class FloatingPet(QWidget):
         self._anim_timer.start()
         # 鼠标跟踪平滑插值
         self._smooth_mouse = (0.0, 0.0)
+        # 呼吸相位（弧度）与情绪切换淡入进度（0→1）
+        self._breath_phase = 0.0
+        self._emotion_fade = 1.0
 
     # ────────────── 交互系统 ──────────────
 
-    MICRO_ACTIONS = [None, None, None, None, "happy"]  # 大部分时间不动，偶尔 happy 微表情
-
     def _setup_interaction(self) -> None:
+        # 微动作配置（数据驱动；改 ui/resources/pet_conf.json 即可增删动作）
+        self._micro_actions, self._micro_interval, self._micro_enabled = _load_micro_config()
+
         # 随机微动作
         self._idle_micro_timer = QTimer()
         self._idle_micro_timer.timeout.connect(self._do_micro_action)
@@ -196,31 +304,50 @@ class FloatingPet(QWidget):
         self.setAttribute(Qt.WA_Hover, True)
 
     def _schedule_micro_action(self) -> None:
-        delay = random.randint(15000, 35000)
-        self._idle_micro_timer.start(delay)
+        """按配置区间随机安排下一次微动作。"""
+        low, high = self._micro_interval
+        self._idle_micro_timer.start(random.randint(low, max(low, high)))
 
     def _do_micro_action(self) -> None:
+        """按权重抽签触发一次微动作，播完自动回到 idle。
+
+        仅在 idle 且未拖拽/未贴边隐藏时触发；动作名无对应帧时跳过并记日志。
+        """
         self._idle_micro_timer.stop()
         if self._emotion != "idle" or self._is_hidden or getattr(self, '_dragging', False):
             self._schedule_micro_action()
             return
-        action = random.choice(self.MICRO_ACTIONS)
-        if action and action in self._frames_cache:
-            self.set_emotion(action, loop=False, after="idle")
+        if self._micro_enabled:
+            action = weighted_pick(self._micro_actions)
+            if action and action in self._frames_cache:
+                self.set_emotion(action, loop=False, after="idle")
+            elif action:
+                logger.debug("微动作 %s 无对应帧目录，已跳过", action)
         self._schedule_micro_action()
 
+    TRACK_MAX_OFFSET = 3.0     # 单轴最大渲染偏移(px)
+    TRACK_RADIUS = 220.0       # 有效跟随半径(px)，超出则偏移归零
+    TRACK_SMOOTHING = 0.3      # 平滑插值系数
+
     def _track_mouse(self) -> None:
+        """按鼠标位置计算视线跟随偏移（带平滑与限幅）。
+
+        修复要点：原实现用"偏移量的模"判断距离（最大约 4.2，永远小于阈值 180），
+        且偏移未限幅 —— 鼠标远离时 `(pt.x()-cx)/cx*3` 会超出 ±3px 让猫咪飘出窗口。
+        现改为按"鼠标到猫中心的实际距离"判断，并对偏移限幅。
+        """
         pt = self.mapFromGlobal(QCursor.pos())
-        cx, cy = self._display_size // 2, self._display_size // 2
-        tx = (pt.x() - cx) / cx * 3
-        ty = (pt.y() - cy) / cy * 3
-        d = (tx ** 2 + ty ** 2) ** 0.5
-        if d > 180:
-            tx, ty = 0.0, 0.0
-        # 平滑插值
+        tx, ty = compute_track_offset(
+            pt.x(), pt.y(), self._display_size,
+            max_offset=self.TRACK_MAX_OFFSET, radius=self.TRACK_RADIUS,
+        )
         sx, sy = self._smooth_mouse
-        self._smooth_mouse = (sx + (tx - sx) * 0.3, sy + (ty - sy) * 0.3)
-        self._mouse_track_offset = (int(self._smooth_mouse[0]), int(self._smooth_mouse[1]))
+        k = self.TRACK_SMOOTHING
+        self._smooth_mouse = (sx + (tx - sx) * k, sy + (ty - sy) * k)
+        self._mouse_track_offset = (
+            int(round(self._smooth_mouse[0])),
+            int(round(self._smooth_mouse[1])),
+        )
 
     def _on_petted(self) -> None:
         if self._emotion == "idle" and not getattr(self, '_dragging', False):
@@ -238,8 +365,24 @@ class FloatingPet(QWidget):
     def _tick(self) -> None:
         if not self.isVisible():
             return
+
+        # 时间步（秒）：以定时器间隔为准，使呼吸/淡入与帧率解耦
+        dt = max(1, self._anim_timer.interval()) / 1000.0
+        # 呼吸相位推进
+        self._breath_phase = (
+            self._breath_phase + (2.0 * math.pi / self.BREATH_PERIOD) * dt
+        ) % (2.0 * math.pi)
+        # 情绪切换淡入
+        if self._emotion_fade < 1.0:
+            self._emotion_fade = min(
+                1.0, self._emotion_fade + dt / self.EMOTION_FADE_TIME
+            )
+        # 特效层推进（按毫秒）
+        self._fx.advance(dt * 1000.0, self._display_size)
+
         frames = self._frames_cache.get(self._emotion, [])
         if not frames:
+            self.update()
             return
         self._frame_idx += 1
         if self._frame_idx >= len(frames):
@@ -254,9 +397,14 @@ class FloatingPet(QWidget):
         self._anim_timer.setInterval(interval)
         self.update()
 
+    def _breath_scale(self) -> float:
+        """返回当前呼吸缩放系数（以窗口底部为锚点，纵向轻微起伏）。"""
+        return 1.0 + self.BREATH_AMPLITUDE * math.sin(self._breath_phase)
+
     def paintEvent(self, event) -> None:
         frames = self._frames_cache.get(self._emotion, [])
         p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
         if not frames:
             p.setRenderHint(QPainter.TextAntialiasing)
             font = p.font()
@@ -275,13 +423,28 @@ class FloatingPet(QWidget):
         oy += ty
 
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        p.setRenderHint(QPainter.Antialiasing, True)
+
+        # 1) 呼吸形变：以底部为锚点纵向缩放，让脚不悬空
+        breath = self._breath_scale()
+        if abs(breath - 1.0) > 1e-4:
+            p.translate(0.0, float(self._display_size))
+            p.scale(1.0, breath)
+            p.translate(0.0, -float(self._display_size))
+
+        # 2) 情绪切换淡入
+        p.setOpacity(self._emotion_fade)
+
+        # 3) 居中绘制当前帧（含身体重心偏移与视线跟随偏移）
         scaled = pix.scaled(self._display_size, self._display_size,
                             Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        # 居中绘制
         px = (self._display_size - scaled.width()) // 2
         py = (self._display_size - scaled.height()) // 2
         p.drawPixmap(px + ox, py + oy, scaled)
+
+        # 4) 特效层：重置变换与不透明度，按窗口原始坐标系绘制
+        p.setOpacity(1.0)
+        p.resetTransform()
+        self._fx.paint(p, self._display_size)
         p.end()
 
     def set_emotion(self, emotion: str, loop: bool = True, after: str = "idle") -> None:
@@ -291,6 +454,9 @@ class FloatingPet(QWidget):
         self._frame_idx = 0
         self._loop = loop
         self._after = after
+        # 同步特效层并触发淡入（情绪切换是低频操作，淡化在此处才有意义）
+        self._fx.set_emotion(emotion)
+        self._emotion_fade = 0.0
         self.update()
 
     def set_pet_size(self, size: int) -> None:

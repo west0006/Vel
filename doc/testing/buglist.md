@@ -9,7 +9,7 @@
 | V0001 | 2026-10-08 | P2 | ✅ 已修复 | 动画资源脏目录 `pet_lottie'`（结尾多一个单引号） | `ui/resources/animations/` |
 | V0002 | 2026-10-08 | P2 | ✅ 已修复 | 仓库无 `.gitignore`，`venv/` `__pycache__` `pet.db` `build/` 被跟踪（38522 个跟踪文件） | 仓库根目录 |
 | V0003 | 2026-10-08 | **P1** | ✅ 已修复 | `config/settings.yaml` 从未被任何代码读取，其中配置实为死配置；且配置源分裂（`app_settings` 生效 / yaml 不生效） | `config/settings.yaml` · `core/config.py` |
-| V0004 | 2026-10-08 | **P1** | ⏸ 用户自理 | Ollama 中无任何模型，且 `OLLAMA_MODELS` 指向不存在的路径（`E:\dev\ollama\modals`，疑似 `models` 拼写错误） | 运行环境 |
+| V0004 | 2026-10-08 | — | ✅ 撤回（非缺陷） | `ollama list` 为空：模型存于移动硬盘（未挂载时读不到），**用户已实测对话可用** | 运行环境 |
 | V0005 | 2026-10-08 | P3 | ✅ 已修复 | `config/secrets.yaml`（含真实高德 key）被 git 跟踪并入历史 | `config/secrets.yaml` |
 | V0006 | 2026-10-08 | P3 | ✅ 已修复 | `cat_1.png`（1024×1024、1.25MB）全仓无引用的孤立素材，占用仓库体积 | `ui/resources/animations/` |
 
@@ -46,17 +46,12 @@
 
 - **遗留（第二批，未接入）**：`schedule.*`（`reminder_offset_min` / `instance_window_months`）、`window.*`（`pet_size*`）、`memory.decay_half_life_days` / `memory.summary_interval` 仍走代码内默认值。
 
-### V0004 · 无可用 LLM 模型 ⏸ 用户自理（2026-10-08）
+### V0004 · 无可用 LLM 模型 ✅ 撤回（非缺陷，2026-10-08 用户澄清）
 
-- **现象**：`ollama list` 返回空列表。
-- **日志证据**：
-  ```
-  msg="models path not accessible, using default" path=E:\dev\ollama\modals
-  err="GetFileAttributesEx E:\dev\ollama\modals: The system cannot find the path specified."
-  ```
-- **推断**：`OLLAMA_MODELS` 被设为 `E:\dev\ollama\modals`（疑似 `models` 拼写错误），路径不存在 → 回退默认目录，默认目录中也无模型。
-- **影响**：`check_connection()` 失败 → 对话降级为预设回复。
-- **处置**：**用户决定自行处理**（2026-10-08："ollama 需手动启动不管"）。修正环境变量后需 `ollama pull qwen2.5:7b-instruct-q4_K_M`（该名称已随 V0003 统一为 `settings.yaml` 的口径）。
+- **原判断**：`ollama list` 返回空列表 + 日志 `models path not accessible, using default path=E:\dev\ollama\modals` → 推断"无模型、疑似路径拼写错误"。
+- **实际情况（用户澄清）**：模型存放于**移动硬盘**（`E:\dev\ollama\...`），当时未挂载故读不到；**对话功能已由用户实测验证可用**。
+- **教训**：`ollama list` 为空 ≠ 功能不可用 —— 模型目录可位于可移动设备。判断"功能不可用"前应以**端到端实测**为准，不能仅凭列表为空下结论。
+- **对 V0003 的连带修正**：原本担心的"模型名口径不一致会导致拉不到模型"风险不成立 —— 实际使用的模型以用户硬盘上的为准；`settings.yaml` 的口径仍作为**配置与文档的单一来源**保留。
 
 ### V0005 · 密钥入库 ✅ 已修复（2026-10-08）
 

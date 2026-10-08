@@ -1,0 +1,15 @@
+{
+  "_comment": "桌宠行为配置。改本文件即可调整微动作，无需改代码。",
+
+  "micro_actions_enabled": true,
+  "idle_min_interval_ms": 15000,
+  "idle_max_interval_ms": 35000,
+
+  "_micro_actions_comment": "act_list 中的动作名必须是 ui/resources/animations/pet_svg/ 下已存在的帧目录；act_prob 是权重（不是概率阈值），权重越大越常出现。",
+  "micro_actions": [
+    { "name": "东张西望", "act_list": ["alert"], "act_prob": 0.6 },
+    { "name": "伸懒腰",   "act_list": ["wake"],  "act_prob": 0.3 },
+    { "name": "开心",     "act_list": ["happy"], "act_prob": 0.6 },
+    { "name": "打瞌睡",   "act_list": ["sleep"], "act_prob": 0.15 }
+  ]
+}

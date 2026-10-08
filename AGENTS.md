@@ -38,7 +38,7 @@ Windows 10/11 x64 单人内测的拟人化猫系 AI 桌宠。提供长期记忆�
 | OCR | PaddleOCR（GPU）+ Tesseract 备用 | `services/ocr_service.py` |
 | 位置 / 搜索 | 高德 API（免费层）/ Bing → SearXNG → DuckDuckGo 降级链 | `services/location_service.py`、`services/search_service.py` |
 | 打包 | PyInstaller + 启动器式更新 | `build.spec`、`services/update_service.py` |
-| 桌宠形象/动画 | **像素猫** + SVG 部件分层程序动画（**不引入 Live2D/OpenGL，不做 Lottie、不做骨骼动画**） | `ui/floating_pet.py`、`ui/resources/animations/pet_svg/` |
+| 桌宠形象/动画 | **像素猫** + 整帧形变 + 程序化特效层（**不引入 Live2D/OpenGL；不做 Lottie、骨骼动画、部件分层、像素插值**） | `ui/floating_pet.py`、`ui/resources/animations/pet_svg/` |
 
 模型名以 `config/settings.yaml` 为准；代码内默认值（如 `llm_service.py` 的 `model` 参数）**只是兜底，不得作为依据**。
 
@@ -160,7 +160,7 @@ ui/  ──►  modules/  ──►  services/  ──►  core/  ──►  uti
   - 语音识别、TTS 仅保留接口，UI 不露出；
   - OCR 仅用灰度化 + 缩放，高级预处理默认关闭；
   - 个性化引擎先用规则 + SQLite 键值对，暂不启用高级检索；
-  - 桌宠形象固定为**像素猫**；动画采用 **SVG 部件分层 + 代码程序驱动**（`body/ears/tail/eyes` 四层 + `QPropertyAnimation` + `QTimer`），**不引入 Live2D/OpenGL**、不做 Lottie、不做骨骼动画。详见 `doc/CURRENT-STATUS.md` §六 决策记录 D-001。
+  - 桌宠形象固定为**像素猫**；动画采用 **整帧形变 + 程序化特效层 + 交叉淡化**（变换层做呼吸/视线跟随/弹跳，特效层用 `QPainter` 绘制 Zzz/爱心/汗滴等），**不引入 Live2D/OpenGL**、不做 Lottie、不做骨骼动画、不做部件分层、不做像素级插值。详见 `doc/CURRENT-STATUS.md` §六 决策记录 D-001 / D-003。
 
 ---
 
