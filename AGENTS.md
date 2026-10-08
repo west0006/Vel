@@ -75,6 +75,7 @@ Windows 10/11 x64 单人内测的拟人化猫系 AI 桌宠。提供长期记忆�
 | 设置面板 / 托盘 / 主题 / 字体 | `ui/settings_window.py`、`ui/system_tray.py`、`ui/theme.py` |
 | 日志、加密、系统信息 | `utils/` |
 | 数据库表结构变更 | 必须新增 `data/db/migrations/` SQL 脚本，并同步 `data/db/schema.sql` |
+| 素材体检工具（动画帧一致性检查） | `tools/check_anim_frames.py` |
 | 单元测试 | `tests/unit/`（每完成一个模块必须同步补） |
 
 ---

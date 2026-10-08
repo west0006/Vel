@@ -7,9 +7,8 @@ import json
 import math
 import os
 import random
-import xml.etree.ElementTree as ET
 from PyQt5.QtCore import Qt, QTimer, QRect, QPoint, QPropertyAnimation, QEasingCurve, pyqtSignal
-from PyQt5.QtGui import QPainter, QPixmap, QMouseEvent, QCursor, QBitmap
+from PyQt5.QtGui import QPainter, QPixmap, QMouseEvent, QCursor, QBitmap, QImage
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QWidget, QLabel, QApplication
 
@@ -20,46 +19,60 @@ logger = get_logger(__name__)
 
 FRAME_DIR = os.path.join(os.path.dirname(__file__), "resources", "animations", "pet_svg")
 
-# 暖色调（猫身体、肚皮、腮红），用于计算视觉重心
-_BODY_HEX_PREFIXES = ("#f", "#e", "#d", "#c")
+#: 帧归一化参数
+FRAME_RENDER_SIZE = 512            # 预渲染尺寸（2x，保证缩放质量）
+FRAME_TARGET_HEIGHT_RATIO = 0.86   # 归一化目标高度占预渲染高度的比例
+FRAME_TARGET_WIDTH_RATIO = 0.94    # 归一化目标宽度上限占预渲染宽度的比例
+FRAME_AREA_FILL = 0.92             # 目标面积填充系数（按面积归一化：人眼对面积更敏感）
+FRAME_SCALE_LIMITS = (0.40, 3.00)  # 极端缩放保护（避免异常帧被放大到失真）
+FRAME_BOTTOM_RATIO = 0.96          # 主题底部在窗口中的相对位置（留白 4%）
+ALPHA_THRESHOLD = 30               # 不透明判定阈值（绘制与点击判定共用）
 
 
-def _compute_body_center(svg_path: str) -> tuple:
-    """解析像素画 SVG，返回暖色 rect 的包围盒中心 (cx, cy)。
+def _alpha_bbox(pix: QPixmap, threshold: int = ALPHA_THRESHOLD) -> "Optional[QRect]":
+    """计算 pixmap 的不透明区域包围盒。
 
-    排除深色轮廓（#0-#4 开头），只计算身体部分的几何中心。
+    这是帧归一化的基础：AI 生成的帧尺寸与位置**逐帧漂移**（诊断数据见
+    `doc/dev/计划-当前待办.md` §3.0 —— 尺寸差异最高近 2 倍、底边跳动 36px），
+    必须先量出主题的实际范围，才能统一缩放与对齐。
+
+    Args:
+        pix: 已渲染的帧。
+        threshold: alpha 阈值。
+
+    Returns:
+        包围盒；全透明或计算失败时返回 ``None``（调用方回退整幅绘制）。
     """
     try:
-        tree = ET.parse(svg_path)
-        root = tree.getroot()
-        min_x, min_y = 256, 256
-        max_x, max_y = 0, 0
-        count = 0
-        for rect in root.iter("{http://www.w3.org/2000/svg}rect"):
-            fill = rect.get("fill", "")
-            if not fill.startswith(_BODY_HEX_PREFIXES):
-                continue
-            x = int(rect.get("x", 0))
-            y = int(rect.get("y", 0))
-            w = int(rect.get("width", 4))
-            h = int(rect.get("height", 4))
-            min_x = min(min_x, x)
-            min_y = min(min_y, y)
-            max_x = max(max_x, x + w)
-            max_y = max(max_y, y + h)
-            count += 1
-        if count == 0:
-            return (0, 0)
-        cx = (min_x + max_x) // 2
-        cy = (min_y + max_y) // 2
-        # 返回偏移量：画布中心(128,128) 到 身体中心的差值
-        return (128 - cx, 128 - cy)
+        import numpy as np
+
+        img = pix.toImage().convertToFormat(QImage.Format_ARGB32)
+        width, height = img.width(), img.height()
+        ptr = img.constBits()
+        ptr.setsize(img.byteCount())
+        alpha = np.frombuffer(ptr, np.uint8).reshape(height, width, 4)[:, :, 3]
+        mask = alpha > threshold
+        if not mask.any():
+            return None
+        ys, xs = np.where(mask)
+        return QRect(int(xs.min()), int(ys.min()),
+                     int(xs.max() - xs.min() + 1), int(ys.max() - ys.min() + 1))
     except Exception:
-        return (0, 0)
+        logger.exception("计算帧包围盒失败，回退整幅绘制")
+        return None
 
 
 def _load_frames(state: str) -> list:
-    """加载某状态的全部 SVG 帧，预渲染为 (QPixmap, offset, mask) 列表。"""
+    """加载某状态的全部 SVG 帧，**裁切包围盒并归一化到统一高度**。
+
+    归一化针对诊断出的两个最刺眼的跳变（依据见 `doc/dev/计划-当前待办.md` §3.0）：
+
+    - **尺寸跳变**：各帧主题宽高差异最高近 2 倍（如 sleep 123~231px）→ 等比统一缩放；
+    - **位置跳变**：各帧主题位置漂移（底边跳动最多 36px）→ 由绘制方按底部对齐。
+
+    Returns:
+        ``QPixmap`` 列表，每帧已裁切 + 等比缩放；目录缺失时返回空列表。
+    """
     folder = os.path.join(FRAME_DIR, state)
     if not os.path.isdir(folder):
         return []
@@ -72,21 +85,40 @@ def _load_frames(state: str) -> list:
         path = os.path.join(folder, fname)
         try:
             renderer = QSvgRenderer(path)
-            # 2x 预渲染：512×512 → SmoothTransformation 缩至 256
-            hi = QPixmap(512, 512)
-            hi.fill(Qt.transparent)
-            ph = QPainter(hi)
+            canvas = QPixmap(FRAME_RENDER_SIZE, FRAME_RENDER_SIZE)
+            canvas.fill(Qt.transparent)
+            ph = QPainter(canvas)
             ph.setRenderHint(QPainter.Antialiasing, False)
             renderer.render(ph)
             ph.end()
-            pix = hi.scaled(256, 256, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            offset = _compute_body_center(path)
-            mask = pix.createMaskFromColor(Qt.transparent, Qt.MaskOutColor)
-            frames.append((pix, offset, mask))
+
+            box = _alpha_bbox(canvas)
+            if box is None or box.width() <= 0 or box.height() <= 0:
+                logger.warning(f"帧 {path} 无有效主题区域，已跳过")
+                continue
+            subject = canvas.copy(box)
+
+            # 归一化：按面积对齐（人眼对面积更敏感），并用目标框约束避免超框。
+            # 仅按高度归一化时，横向姿态帧（如 sleep 蜷缩）宽度可达纵向帧的 2.6 倍，
+            # 观感仍是"忽大忽小"，故改为面积优先 + 框约束。
+            target_h = FRAME_RENDER_SIZE * FRAME_TARGET_HEIGHT_RATIO
+            target_w = FRAME_RENDER_SIZE * FRAME_TARGET_WIDTH_RATIO
+            target_area = target_h * target_w * FRAME_AREA_FILL
+            area_scale = (target_area / (subject.width() * subject.height())) ** 0.5
+            scale = min(area_scale,
+                        target_h / subject.height(),
+                        target_w / subject.width())
+            lo, hi = FRAME_SCALE_LIMITS
+            scale = max(lo, min(hi, scale))
+            frames.append(subject.scaled(
+                max(1, int(subject.width() * scale)),
+                max(1, int(subject.height() * scale)),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation,
+            ))
         except Exception as e:
             logger.warning(f"加载帧失败: {path} -> {e}")
     if frames:
-        logger.info(f"加载 [{state}] {len(frames)} 帧")
+        logger.info(f"加载 [{state}] {len(frames)} 帧（已按包围盒归一化）")
     return frames
 
 
@@ -180,6 +212,33 @@ def _load_micro_config():
     except Exception:
         logger.exception("读取 pet_conf.json 失败，使用默认微动作配置")
     return actions, interval, enabled
+
+
+def compute_frame_rect(pix_width: int, pix_height: int, display_size: int,
+                       track_offset: tuple = (0, 0),
+                       bottom_ratio: float = FRAME_BOTTOM_RATIO) -> QRect:
+    """计算归一化帧在窗口内的绘制矩形（模块级纯函数，便于单元测试）。
+
+    归一化后的帧已按包围盒裁切，故只需：水平居中 + **底部对齐** + 视线跟随偏移。
+    底部对齐用于消除各帧底边漂移（诊断：原始帧底边跳动最多 36px）。
+
+    Args:
+        pix_width: 归一化帧宽度（预渲染坐标系）。
+        pix_height: 归一化帧高度（预渲染坐标系）。
+        display_size: 窗口边长（逻辑像素）。
+        track_offset: 视线跟随偏移 ``(tx, ty)``。
+        bottom_ratio: 主题底部在窗口中的相对位置。
+
+    Returns:
+        绘制矩形（窗口局部坐标）。
+    """
+    scale = display_size / float(FRAME_RENDER_SIZE)
+    width = max(1, int(round(pix_width * scale)))
+    height = max(1, int(round(pix_height * scale)))
+    tx, ty = track_offset
+    x = (display_size - width) // 2 + int(tx)
+    y = int(display_size * bottom_ratio) - height + int(ty)
+    return QRect(x, y, width, height)
 
 
 class FloatingPet(QWidget):
@@ -401,6 +460,20 @@ class FloatingPet(QWidget):
         """返回当前呼吸缩放系数（以窗口底部为锚点，纵向轻微起伏）。"""
         return 1.0 + self.BREATH_AMPLITUDE * math.sin(self._breath_phase)
 
+    def _frame_rect(self, pix: QPixmap) -> QRect:
+        """计算当前帧的绘制矩形（居中 + 底部对齐 + 视线跟随偏移）。
+
+        Args:
+            pix: 归一化后的帧。
+
+        Returns:
+            绘制矩形（窗口局部坐标）。
+        """
+        return compute_frame_rect(
+            pix.width(), pix.height(), self._display_size,
+            self._mouse_track_offset, FRAME_BOTTOM_RATIO,
+        )
+
     def paintEvent(self, event) -> None:
         frames = self._frames_cache.get(self._emotion, [])
         p = QPainter(self)
@@ -413,33 +486,24 @@ class FloatingPet(QWidget):
             p.drawText(self.rect(), Qt.AlignCenter, "🐱")
             p.end()
             return
-        idx = self._frame_idx % len(frames)
-        pix, offset, _ = frames[idx]
-        dx, dy = offset
-        scale = self._display_size / 256
-        ox, oy = int(dx * scale), int(dy * scale)
-        tx, ty = self._mouse_track_offset
-        ox += tx
-        oy += ty
+        pix = frames[self._frame_idx % len(frames)]
+        rect = self._frame_rect(pix)
 
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
 
-        # 1) 呼吸形变：以底部为锚点纵向缩放，让脚不悬空
+        # 1) 呼吸形变：以主题底部为锚点纵向缩放，让脚不悬空
         breath = self._breath_scale()
         if abs(breath - 1.0) > 1e-4:
-            p.translate(0.0, float(self._display_size))
+            anchor = float(rect.bottom())
+            p.translate(0.0, anchor)
             p.scale(1.0, breath)
-            p.translate(0.0, -float(self._display_size))
+            p.translate(0.0, -anchor)
 
         # 2) 情绪切换淡入
         p.setOpacity(self._emotion_fade)
 
-        # 3) 居中绘制当前帧（含身体重心偏移与视线跟随偏移）
-        scaled = pix.scaled(self._display_size, self._display_size,
-                            Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        px = (self._display_size - scaled.width()) // 2
-        py = (self._display_size - scaled.height()) // 2
-        p.drawPixmap(px + ox, py + oy, scaled)
+        # 3) 绘制当前帧（归一化后按矩形缩放绘制）
+        p.drawPixmap(rect, pix)
 
         # 4) 特效层：重置变换与不透明度，按窗口原始坐标系绘制
         p.setOpacity(1.0)
@@ -482,18 +546,23 @@ class FloatingPet(QWidget):
             self._drag_start_pos = e.globalPos()
 
     def _is_click_on_body(self, pos: QPoint) -> bool:
-        """检查点击位置是否在猫咪身体上（非透明区域）。"""
+        """检查点击位置是否落在猫咪身体上（按归一化帧的 alpha 判定）。
+
+        与 ``paintEvent`` 共用 ``_frame_rect``，保证命中区域与实际绘制像素一致
+        （归一化改变了绘制几何，若两处不共用会错位）。
+        """
         frames = self._frames_cache.get(self._emotion, [])
         if not frames:
             return True
-        idx = self._frame_idx % len(frames)
-        pix, offset, _ = frames[idx]
-        sx = int(pos.x() * 256 / self._display_size)
-        sy = int(pos.y() * 256 / self._display_size)
-        if sx < 0 or sy < 0 or sx >= 256 or sy >= 256:
+        pix = frames[self._frame_idx % len(frames)]
+        rect = self._frame_rect(pix)
+        if not rect.contains(pos):
             return False
-        img = pix.toImage()
-        return img.pixelColor(sx, sy).alpha() > 30
+        # 映射回归一化帧的位图坐标
+        lx = int((pos.x() - rect.x()) * pix.width() / max(1, rect.width()))
+        ly = int((pos.y() - rect.y()) * pix.height() / max(1, rect.height()))
+        image = pix.toImage()
+        return image.pixelColor(lx, ly).alpha() > ALPHA_THRESHOLD
 
     def mouseMoveEvent(self, e: QMouseEvent) -> None:
         if self._dragging:
