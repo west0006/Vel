@@ -135,7 +135,8 @@ class NotificationBubble(QFrame):
     def _on_dismiss_finished(self) -> None:
         self.hide(); self._is_dismissing = False
         try: self._animation.finished.disconnect(self._on_dismiss_finished)
-        except TypeError: pass
+        except TypeError:
+            logger.exception("_on_dismiss_finished 执行失败")
         if self._manager: self._manager._on_notification_closed(self._notification_id)
 
     def _on_action(self, action: str) -> None:

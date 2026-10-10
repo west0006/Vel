@@ -287,7 +287,7 @@ class SedentaryMonitor:
                     )
                     db.commit()
             except Exception:
-                pass
+                logger.exception("_on_guide_tick 执行失败")
 
             bus.publish(EVENT_HEALTH_REMINDER, {
                 "type": "activity_complete",

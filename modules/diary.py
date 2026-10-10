@@ -99,7 +99,7 @@ class DiaryGenerator:
             r = db.execute("SELECT mood_label FROM mood_snapshot WHERE date(timestamp)=? ORDER BY timestamp DESC LIMIT 1", (ds,)).fetchone()
             data["mood"] = r[0] if r else "平静"
         except Exception:
-            pass
+            logger.exception("_collect 执行失败")
         return data
 
     def _template_summary(self, d: Dict[str, int], target: date) -> str:

@@ -121,7 +121,7 @@ class ToolExecutor:
                 if parsed:
                     target_date = parsed.date()
             except Exception:
-                pass
+                logger.exception("_tool_get_diary 执行失败")
 
         summary = diary.get_diary(target_date) or diary.generate(target_date)
         return summary or f"{target_date} 还没有日记喵~", True

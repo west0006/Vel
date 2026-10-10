@@ -85,7 +85,7 @@ class SearchService:
                 self._bing_key = bing.get("api_key", "")
                 self._bing_endpoint = bing.get("endpoint", self._bing_endpoint)
         except Exception:
-            pass
+            logger.exception("_load_config 执行失败")
 
         # 检测占位符 / 无效 key，直接跳过 Bing
         if not self._bing_key or "你的" in self._bing_key or len(self._bing_key) < 20:
@@ -274,7 +274,7 @@ class SearchService:
             from ddgs import DDGS as DDGS_new
             DDGS = DDGS_new
         except ImportError:
-            pass
+            logger.exception("_search_duckduckgo_lib 执行失败")
         # 回退旧包名，抑制弃用警告
         if DDGS is None:
             try:
@@ -404,7 +404,7 @@ class SearchService:
                 )
                 db.commit()
         except Exception:
-            pass
+            logger.exception("_save_monthly_count 执行失败")
 
     def _load_monthly_count(self) -> None:
         try:
@@ -421,7 +421,7 @@ class SearchService:
                     self._bing_monthly_count = int(row2[0])
                     self._bing_monthly_month = month
         except Exception:
-            pass
+            logger.exception("_load_monthly_count 执行失败")
 
     def get_quota_status(self) -> Dict[str, Any]:
         return {

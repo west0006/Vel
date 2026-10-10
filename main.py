@@ -340,7 +340,7 @@ class VelApplication:
                         ])
                         logger.info("LLM 模型预热完成")
                     except Exception:
-                        pass
+                        logger.exception("_warm 执行失败")
                 threading.Thread(target=_warm, daemon=True).start()
                 self._floating_pet.show_tip("Vel 已准备好~", 3000)
             else:
@@ -608,7 +608,7 @@ class VelApplication:
                     elif self._state_manager.user_state == UserActivityState.BUSY:
                         self._state_manager.set_user_state(UserActivityState.ACTIVE)
         except Exception:
-            pass
+            logger.exception("_check_idle_and_fullscreen 执行失败")
         elapsed = (datetime.now() - self._last_activity).total_seconds()
         if elapsed > 300 and self._state_manager.user_state == UserActivityState.ACTIVE:
             self._state_manager.set_user_state(UserActivityState.IDLE)

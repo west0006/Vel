@@ -236,7 +236,7 @@ class MealEngine:
             if resp.status_code == 200 and resp.text.strip():
                 return resp.text.strip()
         except Exception:
-            pass
+            logger.exception("_get_weather 执行失败")
         return None
 
     def _get_nearby_shops(self, meal_type: str) -> List[Dict[str, Any]]:
@@ -246,7 +246,7 @@ class MealEngine:
             if location_service:
                 return location_service.search_nearby("餐饮", limit=5)
         except Exception:
-            pass
+            logger.exception("_get_nearby_shops 执行失败")
         return []
 
     # ------------------------------------------------------------------

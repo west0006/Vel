@@ -69,7 +69,7 @@ class MemoManager:
                     remind_at = parsed
                     reminder_text = content.replace(time_phrase, "").strip()
             except Exception:
-                pass
+                logger.exception("parse_and_create 执行失败")
 
         # 存入数据库
         memo_id = str(uuid.uuid4())

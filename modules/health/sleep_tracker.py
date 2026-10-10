@@ -238,7 +238,7 @@ class SleepTracker:
                 if row[0]:
                     self._sleep_time_estimate = datetime.fromisoformat(row[0])
         except Exception:
-            pass
+            logger.exception("_load_today 执行失败")
 
     # ------------------------------------------------------------------
     # 查询

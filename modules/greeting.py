@@ -30,7 +30,7 @@ class GreetingService:
                 if row and row[0] == today:
                     return None  # 今日已问候
         except Exception:
-            pass
+            logger.exception("check_and_greet 执行失败")
 
         # 收集上下文
         context = self._collect_context()
@@ -46,7 +46,7 @@ class GreetingService:
                 )
                 db.commit()
         except Exception:
-            pass
+            logger.exception("check_and_greet 执行失败")
 
         logger.info(f"问候已生成: {greeting[:40]}...")
         return greeting
@@ -61,7 +61,7 @@ class GreetingService:
                 nick = pm.get_profile("nickname", "")
                 if nick: ctx["nickname"] = nick
         except Exception:
-            pass
+            logger.exception("_collect_context 执行失败")
 
         # 天气（wttr.in 免费无Key，<2s）
         try:
@@ -71,7 +71,7 @@ class GreetingService:
             if resp.status_code == 200 and resp.text.strip():
                 ctx["weather"] = resp.text.strip()  # 如 "☀️ +22°C"
         except Exception:
-            pass
+            logger.exception("_collect_context 执行失败")
 
         # 情绪
         try:
@@ -83,7 +83,7 @@ class GreetingService:
                 if row:
                     ctx["mood"] = {"positive": "开心", "neutral": "平静", "negative": "有点累"}.get(row[0], "")
         except Exception:
-            pass
+            logger.exception("_collect_context 执行失败")
 
         return ctx
 

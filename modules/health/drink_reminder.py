@@ -337,4 +337,4 @@ class DrinkReminder:
                 try:
                     self._scheduler.remove_job(job_id)
                 except Exception:
-                    pass
+                    logger.exception("shutdown 执行失败")

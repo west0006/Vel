@@ -394,7 +394,7 @@ class ChatBubble(QFrame):
         try:
             self._animation.finished.disconnect(self._on_hide_finished)
         except TypeError:
-            pass
+            logger.exception("_on_hide_finished 执行失败")
 
     @property
     def is_bubble_visible(self) -> bool:

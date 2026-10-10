@@ -289,7 +289,7 @@ class OnboardingWizard(QDialog):
                                        (k, str(all_data[k])))
                     db.commit()
             except Exception:
-                pass
+                logger.exception("_finish 执行失败")
 
         self.wizard_finished.emit(all_data)
         self.accept()

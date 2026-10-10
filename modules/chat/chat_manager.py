@@ -321,7 +321,7 @@ class ChatManager:
                 if llm_summary and len(llm_summary) > 5:
                     summary = llm_summary.strip()
             except Exception:
-                pass
+                logger.exception("_trigger_summary 执行失败")
 
         if self._memory_service:
             self._memory_service.add_memory(

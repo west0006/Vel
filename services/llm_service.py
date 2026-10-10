@@ -61,6 +61,11 @@ class LLMService:
         self._consecutive_failures = 0
         self._max_failures_before_degrade = 3
         self._is_degraded = False
+        # 降级后的恢复探测：每 _degrade_probe_interval 次生成尝试一次真实调用。
+        # 修复缺陷：此前 `if self._is_degraded: return fallback` 直接返回，
+        # 导致一旦降级就永不恢复（Ollama 重启 / 模型重载后无法自愈，除非重启程序）。
+        self._degrade_probe_counter = 0
+        self._degrade_probe_interval = 5
 
     # ------------------------------------------------------------------
     # 系统提示管理
@@ -140,10 +145,15 @@ class LLMService:
             模型回复文本
         """
         if self._is_degraded:
-            reply = self._get_fallback_reply()
-            self.add_to_history("user", user_input)
-            self.add_to_history("assistant", reply)
-            return reply
+            self._degrade_probe_counter += 1
+            if self._degrade_probe_counter < self._degrade_probe_interval:
+                reply = self._get_fallback_reply()
+                self.add_to_history("user", user_input)
+                self.add_to_history("assistant", reply)
+                return reply
+            # 达到探测间隔：本次走真实调用，成功即自动退出降级模式
+            self._degrade_probe_counter = 0
+            logger.info("降级模式探测恢复：尝试真实调用")
 
         self.add_to_history("user", user_input)
         messages = self._build_messages(memories)
@@ -151,7 +161,10 @@ class LLMService:
         try:
             reply = self._call_ollama(messages)
             self._consecutive_failures = 0
+            if self._is_degraded:
+                logger.info("LLM 已恢复，退出降级模式")
             self._is_degraded = False
+            self._degrade_probe_counter = 0
             self.add_to_history("assistant", reply)
             return reply
 

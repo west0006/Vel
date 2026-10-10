@@ -210,7 +210,7 @@ class ModelManager:
                 pynvml.nvmlShutdown()
                 self._nvml_ready = False
             except Exception:
-                pass
+                logger.exception("shutdown 执行失败")
 
 
 model_manager = ModelManager()

@@ -69,7 +69,7 @@ class LocationService:
                 config = yaml.safe_load(f)
                 return config.get("gaode", {}).get("api_key", "")
         except Exception:
-            pass
+            logger.exception("_load_api_key 执行失败")
         return ""
 
     # ------------------------------------------------------------------
@@ -176,7 +176,7 @@ class LocationService:
                         "adcode": "", "rectangle": f"{j.get('latitude', '')},{j.get('longitude', '')}",
                     }
         except Exception:
-            pass
+            logger.exception("_fallback_ip_api 执行失败")
 
         # 源2：ip-api.com（JSON，免费无限）
         try:
@@ -191,7 +191,7 @@ class LocationService:
                         "rectangle": f"{j.get('lat', '')},{j.get('lon', '')}",
                     }
         except Exception:
-            pass
+            logger.exception("_fallback_ip_api 执行失败")
 
         return None
     # ------------------------------------------------------------------
@@ -396,7 +396,7 @@ class LocationService:
             )
             db.commit()
         except Exception:
-            pass
+            logger.exception("_save_daily_count 执行失败")
 
     def _load_daily_count(self) -> None:
         """从数据库加载当日计数。"""
@@ -418,7 +418,7 @@ class LocationService:
                     self._daily_count = int(row2[0])
                     self._daily_date = today
         except Exception:
-            pass
+            logger.exception("_load_daily_count 执行失败")
 
     def get_quota_status(self) -> Dict[str, Any]:
         """获取配额状态。"""
@@ -446,5 +446,5 @@ class LocationService:
             if resp.status_code == 200 and resp.text.strip():
                 return {"condition": resp.text.strip()}
         except Exception:
-            pass
+            logger.exception("get_weather 执行失败")
         return None

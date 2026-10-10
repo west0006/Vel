@@ -9,6 +9,10 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QPen, QBrush
 from PyQt5.QtSvg import QSvgRenderer
 
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 # ============================================================
 # 配色
@@ -254,7 +258,7 @@ def _svg_to_pixmap(svg_path: str, size: int, color: str = Colors.ACCENT) -> QPix
         renderer.render(painter)
         painter.end()
     except Exception:
-        pass
+        logger.exception("load_icon 渲染 SVG 失败")
 
     return pix
 

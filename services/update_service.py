@@ -44,5 +44,5 @@ class UpdateService:
                 if row:
                     return row[0]
         except Exception:
-            pass
+            logger.exception("get_current_version 执行失败")
         return "0.1.0-alpha"

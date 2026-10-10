@@ -251,7 +251,7 @@ class SettingsWindow(QDialog):
                 icon = "✅" if status == "completed" else "📌"
                 self._sched_list.addItem(f"{icon} {title}  ({st[11:16] if len(st) > 10 else '全天'})")
         except Exception:
-            pass
+            logger.exception("_load_schedule_for_date 执行失败")
 
     def _refresh_schedule(self) -> None:
         self._sched_list.clear()
@@ -266,7 +266,7 @@ class SettingsWindow(QDialog):
                 icon = "✅" if status == "completed" else "📌"
                 self._sched_list.addItem(f"{icon} {title}  ({st[:16]})")
         except Exception:
-            pass
+            logger.exception("_refresh_schedule 执行失败")
 
     def _add_schedule_dialog(self) -> None:
         d = QDialog(self)
@@ -301,7 +301,7 @@ class SettingsWindow(QDialog):
                 self._refresh_schedule()
                 d.accept()
             except Exception:
-                pass
+                logger.exception("_add 执行失败")
         ok.clicked.connect(_add)
         bl.addWidget(ok); dl.addLayout(bl)
         d.exec_()
@@ -369,7 +369,7 @@ class SettingsWindow(QDialog):
                 color = Colors.DANGER if st["continuous_min"] >= st["threshold_min"] else Colors.TEXT_PRIMARY
                 self._sitting_label.setText(f'连续活动 <span style="color:{color}; font-weight:bold;">{st["continuous_min"]}</span> 分钟（阈值 {st["threshold_min"]}min）')
         except Exception:
-            pass
+            logger.exception("_refresh_health_stats 执行失败")
 
     def _apply_health(self) -> None:
         try:
@@ -385,7 +385,7 @@ class SettingsWindow(QDialog):
             sd = registry.get("sedentary_monitor")
             if sd: sd.update_threshold(self._sed_slider.value())
         except Exception:
-            pass
+            logger.exception("_apply_health 执行失败")
 
     def _page_habit(self) -> QWidget:
         layout, w = self._page_wrap()
@@ -410,7 +410,7 @@ class SettingsWindow(QDialog):
                     f"{icon} {h['name']}  {h['streak']}天 streak  ⏰{h['target_time']}"
                 )
         except Exception:
-            pass
+            logger.exception("_refresh_habit 执行失败")
 
 
     def _page_memo(self) -> QWidget:
@@ -434,7 +434,7 @@ class SettingsWindow(QDialog):
                 ts = m["remind_at"][:16] if m["remind_at"] else "无提醒"
                 self._memo_list.addItem(f"📌 {ts}  {m['content']}")
         except Exception:
-            pass
+            logger.exception("_refresh_memo 执行失败")
 
     # --- 对话 ---
 
@@ -474,7 +474,7 @@ class SettingsWindow(QDialog):
                     ).fetchall():
                         lst.addItem(f"[{cat}] {decrypt(summary)[:60]}  (重要性:{imp})")
             except Exception:
-                pass
+                logger.exception("_open_memory_dialog 执行失败")
         dl.addWidget(lst)
         bl = QHBoxLayout()
         bl.addStretch()
@@ -491,7 +491,7 @@ class SettingsWindow(QDialog):
                 icon = "👤" if h["role"] == "user" else "🐱"
                 self._chat_list.addItem(f"{icon} {(h.get('content') or '')[:80]}")
         except Exception:
-            pass
+            logger.exception("_refresh_chat 执行失败")
 
     def _clear_context(self) -> None:
         cm = registry.get("chat_manager")
@@ -583,7 +583,7 @@ class SettingsWindow(QDialog):
             if chat:
                 chat.setWindowOpacity(opacity)
         except Exception:
-            pass
+            logger.exception("_apply_brightness 执行失败")
 
     # def _apply_theme(self, color: str) -> None:
     #     """应用主题色（需重启生效的部分仅记录）。"""
