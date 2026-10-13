@@ -92,6 +92,11 @@ class EventBus:
         """注册 UI 订阅者（线程安全）。回调通过 Qt 信号槽调度到主线程。"""
         with self._lock:
             self._ui_subscribers.setdefault(event_type, []).append(callback)
+        # 在**订阅时**（通常发生在主线程启动阶段）就创建 UiSignals，保证其线程亲和性正确。
+        # 若延后到首次 publish 才创建、且那次 publish 来自后台线程，UiSignals 会绑定到
+        # 该后台线程，QueuedConnection 将把 UI 事件投递到没有事件循环的线程 ——
+        # 回调永不执行（集成测试 tests/integration/test_event_bus_flow.py 暴露了此问题）。
+        self._get_ui_signals()
 
     def unsubscribe(self, event_type: str, callback: Callable) -> bool:
         """取消订阅指定的回调。"""

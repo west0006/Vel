@@ -14,6 +14,8 @@
 | V0006 | 2026-10-08 | P3 | ✅ 已修复 | `cat_1.png`（1024×1024、1.25MB）全仓无引用的孤立素材，占用仓库体积 | `ui/resources/animations/` |
 | V0007 | 2026-10-08 | **P1** | ✅ 已修复 | `llm_service` 进入降级模式后**永不恢复** —— Ollama 重启/模型重载后仍走预设回复，直到重启程序 | `services/llm_service.py` |
 | V0008 | 2026-10-08 | P2 | ✅ 已修复 | 42 处 `except ...: pass` 静默吞异常（违反 AGENTS.md §4.4），故障无任何线索 | 19 个文件 |
+| V0009 | 2026-10-08 | **P1** | ✅ 已修复 | `EventBus.subscribe_ui` 不创建 `UiSignals`：若首次 publish 来自后台线程，Qt 对象绑定到该线程，UI 事件投递到无事件循环的线程 → **回调永不执行** | `core/event_bus.py` |
+| V0010 | 2026-10-08 | **P1** | ✅ 已修复 | `core/config.py` 别名表缺 `health.*` 映射：schema 与用户数据中的无前缀键（`drink_interval_min`/`sedentary_threshold_min`/`active_hours_*`）**读不到**且 `set()` 后不更新 | `core/config.py` · `data/db/schema.sql` |
 
 ---
 
@@ -81,3 +83,17 @@
 
 - **现象**：`ui/resources/animations/cat_1.png`（1024×1024 RGBA、1.25MB）全仓无引用（`grep -rn "cat_1"` 零命中），却随仓库分发。
 - **处置**：按用户决策采用 **pet.db 同策略** —— `git rm --cached` 解绑 + 加入 `.gitignore`，**磁盘文件保留**（可能是形象素材，将来动画实施可能用得上）。
+
+### V0009 · UI 事件投递可能永久失效 ✅ 已修复（2026-10-08，P1）
+
+- **发现途径**：`tests/integration/test_event_bus_flow.py` 的 UI 投递用例（后台线程 publish → 断言回调在主线程执行）失败。
+- **缺陷**：`UiSignals` 是**惰性创建**的（首次 `publish` 时才建）。若第一次发布 UI 事件时正处于后台线程，Qt 对象会绑定到该线程；`QueuedConnection` 便把事件投递到**没有事件循环的后台线程** → UI 回调永远不执行，且无任何报错。
+- **实际影响**：正常启动流程中通常先由主线程 `subscribe_ui`（隐患不暴露），但「先 publish 后订阅」或「首次 publish 来自子线程」的时序下会静默失效 —— 属难以排查的偶发问题。
+- **修法**：在 `subscribe_ui()` 内即调用 `_get_ui_signals()`，让信号对象在**订阅线程（通常为主线程）**创建，保证线程亲和性正确。
+
+### V0010 · 配置别名缺失导致用户数据读写失效 ✅ 已修复（2026-10-08，P1）
+
+- **发现途径**：`tests/integration/test_database_config.py` 的写入回读用例（`set()` 后检查 db 中的历史键）失败。
+- **缺陷**：`_DB_KEY_ALIASES` 只登记了 `health.drink_target_ml`、`sleep.*`、`search.*`，**缺少** `health.drink_interval_min` / `health.sedentary_threshold_min` / `health.active_hours_start` / `health.active_hours_end` 到无前缀键的映射。
+- **影响**：`data/db/schema.sql` 与用户实际数据里存的是无前缀键（`drink_interval_min` 等），而代码读的是规范键 → **读不到就静默回退 yaml 默认值**（因两者数值恰好相同，问题长期未暴露）；用户手工改库中的无前缀键也不会生效，`config.set()` 亦不会更新旧键。
+- **修法**：补齐 4 条别名映射；`set()` 仍保持「规范键 + 别名双写」。

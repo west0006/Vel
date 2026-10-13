@@ -30,7 +30,14 @@ logger = get_logger(__name__)
 
 #: 规范键 → ``app_settings`` 表中可能使用的历史键名（按优先级排列）
 _DB_KEY_ALIASES: Dict[str, Tuple[str, ...]] = {
+    # health 段的键在 app_settings 中历史以"无前缀"形式存在（见 schema.sql 的初始值），
+    # 缺少这些映射会导致：schema/用户数据里的值读不到（静默回退 yaml 默认）、
+    # config.set() 写入后旧键不更新（使用者读到的仍是旧值）。
+    "health.drink_interval_min": ("drink_interval_min",),
     "health.drink_target_ml": ("drink_daily_target_ml", "drink_target_ml"),
+    "health.sedentary_threshold_min": ("sedentary_threshold_min",),
+    "health.active_hours_start": ("active_hours_start",),
+    "health.active_hours_end": ("active_hours_end",),
     "sleep.start": ("sleep_start",),
     "sleep.end": ("sleep_end",),
     "search.gaode_daily_limit": ("gaode_daily_limit",),
