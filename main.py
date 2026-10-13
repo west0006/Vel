@@ -497,9 +497,15 @@ class VelApplication:
             logger.warning(f"习惯模块失败: {e}")
 
         try:
-            from modules.greeting import GreetingService
-            registry.register("greeting_service", GreetingService())
-            logger.info("问候服务已注册")
+            from modules.greeting import GreetingService, WEATHER_CACHE_KEY, WEATHER_URL
+            from utils.remote_text import remote_text
+
+            greeting = GreetingService()
+            registry.register("greeting_service", greeting)
+            # 启动预热（均不阻塞）：远程文本缓存（天气）+ 当天问候语
+            remote_text.prefetch({WEATHER_CACHE_KEY: WEATHER_URL})
+            greeting.prewarm()
+            logger.info("问候服务已注册（已触发后台预热）")
         except Exception as e:
             logger.warning(f"问候服务失败: {e}")
 
