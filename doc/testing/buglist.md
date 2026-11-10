@@ -17,6 +17,7 @@
 | V0009 | 2026-10-08 | **P1** | ✅ 已修复 | `EventBus.subscribe_ui` 不创建 `UiSignals`：若首次 publish 来自后台线程，Qt 对象绑定到该线程，UI 事件投递到无事件循环的线程 → **回调永不执行** | `core/event_bus.py` |
 | V0010 | 2026-10-08 | **P1** | ✅ 已修复 | `core/config.py` 别名表缺 `health.*` 映射：schema 与用户数据中的无前缀键（`drink_interval_min`/`sedentary_threshold_min`/`active_hours_*`）**读不到**且 `set()` 后不更新 | `core/config.py` · `data/db/schema.sql` |
 | V0011 | 2026-10-08 | P3 | ✅ 已修复 | `update_service` 版本号双源（方法内硬编码 vs `settings.yaml` 的 `app.version`）+ `__init__` 日志谎称"已注册"（实际从未被接线） | `services/update_service.py` |
+| V0012 | 2026-11-10 | **P1** | ✅ 已修复 | `_search_duckduckgo_lib` 函数体不完整：取得 `DDGS` 后**没有任何调用**即隐式返回 `None` → 库通道永久失效，搜索一直落到 Bing/SearXNG/API（装不装 ddgs 都一样） | `services/search_service.py` |
 
 ---
 
@@ -108,3 +109,26 @@
   **修法**：改为"更新服务已实例化（占位骨架，未接线）"，并在模块 docstring 声明"本服务不会被 main.py 注册"。
 - **附带澄清**：本模块**不是"接线遗漏"**，而是设计文档 §4.8 / §9.5 规划的**阶段7功能，目前仅占位**（用户 2026-10-08 决策：暂不实现）。已同步更正 `doc/dev/盘点-质量与生态现状.md` 的 Q5 定性（规模由"中"更正为"大"）。
 - **测试**：`tests/unit/test_update_service.py` 11 项，其中 `test_main_does_not_register_update_service` 锁定"未接线"决策 —— 将来若要接线，必须先实现功能并更新该测试与文档。
+
+### V0012 · 搜索库通道永久失效 ✅ 已修复（2026-11-10，P1）
+
+- **发现途径**：环境体检时发现 `ddgs` 未安装 → 用户指出"记得装过、测过一轮" → 追查发现真正的病因不是缺包。
+- **缺陷**：`services/search_service.py` 的 `_search_duckduckgo_lib` 函数体**不完整** ——
+  ```python
+  DDGS = None
+  try: from ddgs import DDGS as DDGS_new; DDGS = DDGS_new
+  except ImportError: ...
+  if DDGS is None:
+      ... from duckduckgo_search import DDGS
+      except ImportError: return self._search_duckduckgo_api(query, count)
+  # ← 函数到此结束：拿到 DDGS 后没有任何调用，隐式返回 None
+  ```
+  因此**即使装好 ddgs，库通道也永远返回 None**，搜索一直降级到 Bing / SearXNG / API。
+- **为何长期未被测出**：`tests/unit/test_search_service.py` 原有的降级链测试把 `_search_duckduckgo_lib`
+  **整个 mock 掉**（只验证"顺序"），因此其内部实现完全没被覆盖 —— 典型的"mock 掉被测逻辑"盲区。
+- **修法**：补全实现 —— `DDGS().text(query, max_results=count)` → 按 `title` / `body` 格式化为 Markdown
+  列表；异常时回退 `_search_duckduckgo_api`；空结果返回 `None`。
+- **测试**：新增 `TestDuckDuckGoLibChannel` 6 项，其中 `test_calls_ddgs_and_formats_results`
+  **断言 `DDGS().text` 确实被调用且传参正确**（`("测试", {"max_results": 3})`），另有旧包名回退、
+  异常回退、缺包回退、非 dict 项跳过等覆盖。定向回归 23 passed。
+- **关联动作**：环境侧安装 `ddgs 9.16.1`（连带 lxml 6.1.3、primp 2.0.1），全量回归 **263 passed**（257 + 新增 6 项）。

@@ -267,14 +267,14 @@ class SearchService:
             return None
 
     def _search_duckduckgo_lib(self, query: str, count: int = 5) -> Optional[str]:
-        """通过 ddgs / duckduckgo_search 包兜底。"""
+        """通过 ddgs / duckduckgo_search 包搜索（降级链第一级，免费主通道）。"""
         DDGS = None
         # 优先新包名 ddgs
         try:
             from ddgs import DDGS as DDGS_new
             DDGS = DDGS_new
         except ImportError:
-            logger.exception("_search_duckduckgo_lib 执行失败")
+            logger.debug("ddgs 未安装，尝试旧包名 duckduckgo_search")
         # 回退旧包名，抑制弃用警告
         if DDGS is None:
             try:
@@ -283,7 +283,33 @@ class SearchService:
                     warnings.simplefilter("ignore", RuntimeWarning)
                     from duckduckgo_search import DDGS
             except ImportError:
+                logger.debug("duckduckgo_search 也未安装，回退 DuckDuckGo API")
                 return self._search_duckduckgo_api(query, count)
+
+        # 修复（V0012）：此前本方法在取得 DDGS 后**即结束**——没有任何调用、隐式返回 None，
+        # 导致即使安装了 ddgs，库通道也永远走不通（搜索一直落到 Bing/SearXNG/API）。
+        try:
+            results = list(DDGS().text(query, max_results=count))
+        except Exception as e:
+            logger.warning(f"DDG 库搜索异常，回退 DuckDuckGo API: {e}")
+            return self._search_duckduckgo_api(query, count)
+
+        if not results:
+            return None
+
+        lines = []
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            body = str(item.get("body") or "").strip()
+            if title and body:
+                lines.append(f"- **{title}** — {body[:120]}")
+            elif title:
+                lines.append(f"- **{title}**")
+            elif body:
+                lines.append(f"- {body[:160]}")
+        return "\n".join(lines) if lines else None
 
     def _search_duckduckgo_api(self, query: str, count: int = 5) -> Optional[str]:
         try:

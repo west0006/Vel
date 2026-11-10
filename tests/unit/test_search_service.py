@@ -4,6 +4,9 @@
 这些逻辑出错会"静默降级"，用户只看到搜索结果变差却无任何报错。
 """
 
+import sys
+import types
+
 import pytest
 import requests
 
@@ -172,3 +175,81 @@ class TestInitialState:
         monkeypatch.setattr(svc, "search", lambda q, n=5: "some result text")
         raw = svc.search_raw("query")
         assert raw and raw[0]["snippet"].startswith("some result")
+
+
+class TestDuckDuckGoLibChannel:
+    """库通道的真实实现（V0012 回归）。
+
+    说明：此前的降级链测试把 ``_search_duckduckgo_lib`` 整个 mock 掉了，
+    因此"取得 DDGS 后不调用、永远隐式返回 None"的缺陷完全未被发现。
+    本类直接验证其内部逻辑，尤其是**是否真的调用了 DDGS**。
+    """
+
+    @staticmethod
+    def _patch_ddgs(monkeypatch, fake_cls, name="ddgs"):
+        """把假的 DDGS 注入 sys.modules，供函数内 ``from ddgs import DDGS`` 命中。"""
+        module = types.ModuleType(name)
+        module.DDGS = fake_cls
+        monkeypatch.setitem(sys.modules, name, module)
+
+    def test_calls_ddgs_and_formats_results(self, svc, monkeypatch):
+        """核心回归：必须真的调用 DDGS().text，并传对 max_results。"""
+        calls = []
+
+        class _FakeDDGS:
+            def text(self, query, **kwargs):
+                calls.append((query, kwargs))
+                return [
+                    {"title": "标题一", "body": "内容一", "href": "https://a"},
+                    {"title": "标题二", "body": "", "href": "https://b"},
+                ]
+
+        self._patch_ddgs(monkeypatch, _FakeDDGS)
+        output = svc._search_duckduckgo_lib("测试", 3)
+
+        assert "标题一" in output and "内容一" in output
+        assert "标题二" in output
+        assert calls == [("测试", {"max_results": 3})]
+
+    def test_empty_results_returns_none(self, svc, monkeypatch):
+        class _FakeDDGS:
+            def text(self, query, **kwargs):
+                return []
+
+        self._patch_ddgs(monkeypatch, _FakeDDGS)
+        assert svc._search_duckduckgo_lib("q") is None
+
+    def test_exception_falls_back_to_api(self, svc, monkeypatch):
+        class _FakeDDGS:
+            def text(self, query, **kwargs):
+                raise RuntimeError("network boom")
+
+        self._patch_ddgs(monkeypatch, _FakeDDGS)
+        monkeypatch.setattr(svc, "_search_duckduckgo_api", lambda q, n: "api-fallback")
+        assert svc._search_duckduckgo_lib("q") == "api-fallback"
+
+    def test_missing_packages_fall_back_to_api(self, svc, monkeypatch):
+        """两个包都不存在时应走 API 兜底（sys.modules 置 None 可制造 ImportError）。"""
+        monkeypatch.setitem(sys.modules, "ddgs", None)
+        monkeypatch.setitem(sys.modules, "duckduckgo_search", None)
+        monkeypatch.setattr(svc, "_search_duckduckgo_api", lambda q, n: "api-fallback")
+        assert svc._search_duckduckgo_lib("q") == "api-fallback"
+
+    def test_skips_non_dict_items(self, svc, monkeypatch):
+        class _FakeDDGS:
+            def text(self, query, **kwargs):
+                return ["oops", {"title": "ok"}]
+
+        self._patch_ddgs(monkeypatch, _FakeDDGS)
+        assert "ok" in svc._search_duckduckgo_lib("q")
+
+    def test_old_package_name_still_supported(self, svc, monkeypatch):
+        """ddgs 缺失时应回退旧包名 duckduckgo_search。"""
+        monkeypatch.setitem(sys.modules, "ddgs", None)
+
+        class _OldDDGS:
+            def text(self, query, **kwargs):
+                return [{"title": "旧包", "body": "可用"}]
+
+        self._patch_ddgs(monkeypatch, _OldDDGS, name="duckduckgo_search")
+        assert "旧包" in svc._search_duckduckgo_lib("q")
