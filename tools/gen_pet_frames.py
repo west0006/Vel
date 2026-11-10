@@ -80,6 +80,10 @@ EMOTION_RULES: Dict[str, List[Dict[str, float]]] = {
     "collapsed": [{"dy": 0, "scale_y": 1.0},
                   {"dy": 12, "scale_y": 0.93, "scale_x": 1.03},
                   {"dy": 18, "scale_y": 0.90, "scale_x": 1.05}],
+    # 被拎起：左右晃动 + 轻微拉长（"悬空"感）。循环播放 = 被拎着晃。
+    "drag": [{"dy": -2, "angle": 6, "scale_y": 1.03},
+             {"dy": 0, "angle": 0, "scale_y": 1.00},
+             {"dy": -2, "angle": -6, "scale_y": 1.03}],
 }
 
 

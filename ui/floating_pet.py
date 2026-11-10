@@ -195,7 +195,7 @@ def compute_track_offset(mouse_x: float, mouse_y: float, size: int,
 MICRO_CONF_PATH = os.path.join(os.path.dirname(__file__), "resources", "pet_conf.json")
 #: 支持的情绪名（与 ui/resources/animations/pet_svg/ 下的帧目录一一对应）
 KNOWN_EMOTIONS = ("idle", "wake", "thinking", "sleep",
-                  "sad", "happy", "alert", "collapsed")
+                  "sad", "happy", "alert", "collapsed", "drag")
 #: 配置缺失时的兜底动作表（动作名, 权重）
 DEFAULT_MICRO_ACTIONS = (("alert", 0.6), ("wake", 0.3), ("happy", 0.6))
 #: 配置缺失时的兜底间隔范围（毫秒）
@@ -351,6 +351,8 @@ class FloatingPet(QWidget):
         self._drag_position = QPoint()
         self._drag_start_pos = QPoint()
         self._click_threshold = 5
+        #: 是否已进入"真拖拽"（移动超过阈值）。用于拖拽动画的起止判定
+        self._drag_anim_started = False
 
     def _setup_edge_hide(self) -> None:
         self._edge_timer = QTimer()
@@ -379,6 +381,7 @@ class FloatingPet(QWidget):
         "happy":     [180, 70, 320, 140],    # 跳跃：蓄力→起跳→滞空→落地
         "alert":     [120, 140, 320],        # 警觉：突然竖起→保持
         "collapsed": [300, 280, 380],        # 瘫下：逐渐失去力气
+        "drag":      [180, 200, 180],        # 被拎起：左右晃动（循环）
     }
 
     # 呼吸形变：周期（秒）与幅度（±1.6%）
@@ -645,6 +648,14 @@ class FloatingPet(QWidget):
 
     def mouseMoveEvent(self, e: QMouseEvent) -> None:
         if self._dragging:
+            # 移动超过点击阈值才判定为"真拖拽"，切到被拎起的表现；
+            # 用阈值区分可避免单击时猫"抽一下"。
+            if not self._drag_anim_started and (
+                (e.globalPos() - self._drag_start_pos).manhattanLength()
+                >= self._click_threshold
+            ):
+                self._drag_anim_started = True
+                self.set_emotion("drag", loop=True)
             self.move(self.pos() + e.globalPos() - self._drag_position)
             self._drag_position = e.globalPos()
             if self._is_hidden:
@@ -653,6 +664,10 @@ class FloatingPet(QWidget):
     def mouseReleaseEvent(self, e: QMouseEvent) -> None:
         if self._dragging:
             self._dragging = False
+            # 结束"被拎起"表现，回到平静；未真正拖拽（只是单击）时不用处理
+            if self._drag_anim_started:
+                self._drag_anim_started = False
+                self.set_emotion("idle", loop=True)
             if (e.globalPos() - self._drag_start_pos).manhattanLength() < self._click_threshold:
                 self.clicked.emit()
             self.drag_finished.emit(self.x(), self.y())
