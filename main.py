@@ -30,6 +30,42 @@ from ui.notification_bubble import NotificationBubble, NotificationManager
 
 logger = get_logger(__name__)
 
+def should_report_fullscreen(foreground_hwnd: int, own_hwnd: int,
+                             fg_width: int, fg_height: int,
+                             screen_width: int, screen_height: int,
+                             threshold: float = 0.95) -> bool:
+    """判断前台窗口是否应被视为"全屏"（模块级纯函数，便于单元测试）。
+
+    用于决定是否把桌宠沉到底层、并把用户状态切为忙碌。
+
+    设计要点：
+
+    * 排除**桌宠自身**窗口 —— 它自己不是全屏应用，不能据此切换状态；
+    * 任何输入缺失（无前台窗口 / 屏幕尺寸异常）都保守返回 ``False``，
+      避免误判导致桌宠莫名消失。
+
+    Args:
+        foreground_hwnd: 前台窗口句柄（0 表示无前台窗口）。
+        own_hwnd: 桌宠自身窗口句柄（0 表示尚未创建）。
+        fg_width: 前台窗口宽度。
+        fg_height: 前台窗口高度。
+        screen_width: 主屏宽度。
+        screen_height: 主屏高度。
+        threshold: 全屏判定阈值，宽高都需达到屏幕的该比例。
+
+    Returns:
+        是否按全屏处理。
+    """
+    if not foreground_hwnd:
+        return False
+    if own_hwnd and foreground_hwnd == own_hwnd:
+        return False
+    if screen_width <= 0 or screen_height <= 0:
+        return False
+    return (fg_width >= screen_width * threshold
+            and fg_height >= screen_height * threshold)
+
+
 class _ReplyBridge(QObject):
     """信号桥接：后台线程 → 主线程 UI 更新。"""
     ready = pyqtSignal(str, str)
@@ -600,22 +636,36 @@ class VelApplication:
         from core.state_manager import UserActivityState
         import ctypes
         import ctypes.wintypes  # 独立的子模块，仅 import ctypes 无法通过 ctypes.wintypes 访问
-        try:
-            hwnd = ctypes.windll.user32.GetForegroundWindow()
-            if hwnd:
-                rect = ctypes.wintypes.RECT()
-                ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
-                fw, fh = rect.right - rect.left, rect.bottom - rect.top
-                sw = QApplication.primaryScreen().geometry()
-                is_fs = (fw >= sw.width() * 0.95 and fh >= sw.height() * 0.95)
-                if hwnd != int(self.winId() if self._floating_pet else 0):
-                    self._floating_pet.check_fullscreen(is_fs)
-                    if is_fs:
-                        self._state_manager.set_user_state(UserActivityState.BUSY)
-                    elif self._state_manager.user_state == UserActivityState.BUSY:
-                        self._state_manager.set_user_state(UserActivityState.ACTIVE)
-        except Exception:
-            logger.exception("_check_idle_and_fullscreen 执行失败")
+
+        # 全屏检测依赖桌宠窗口句柄；窗口未创建时直接跳过（原实现会在此处抛
+        # AttributeError：既误用了 QApplication 的 winId()，也未防 _floating_pet 为 None）
+        if self._floating_pet is not None:
+            try:
+                screen = QApplication.primaryScreen()
+                if screen is None:
+                    logger.debug("获取主屏失败，跳过一次全屏检测")
+                else:
+                    hwnd = ctypes.windll.user32.GetForegroundWindow()
+                    if hwnd:
+                        rect = ctypes.wintypes.RECT()
+                        ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
+                        geometry = screen.geometry()
+                        is_fullscreen = should_report_fullscreen(
+                            hwnd,
+                            int(self._floating_pet.winId()),
+                            rect.right - rect.left,
+                            rect.bottom - rect.top,
+                            geometry.width(),
+                            geometry.height(),
+                        )
+                        self._floating_pet.check_fullscreen(is_fullscreen)
+                        if is_fullscreen:
+                            self._state_manager.set_user_state(UserActivityState.BUSY)
+                        elif self._state_manager.user_state == UserActivityState.BUSY:
+                            self._state_manager.set_user_state(UserActivityState.ACTIVE)
+            except Exception:
+                logger.exception("_check_idle_and_fullscreen 执行失败")
+
         elapsed = (datetime.now() - self._last_activity).total_seconds()
         if elapsed > 300 and self._state_manager.user_state == UserActivityState.ACTIVE:
             self._state_manager.set_user_state(UserActivityState.IDLE)

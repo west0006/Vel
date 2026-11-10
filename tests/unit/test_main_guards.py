@@ -48,3 +48,52 @@ class TestChatStreamCallSite:
 
         source = inspect.getsource(chat_module.ChatManager._stream_generate)
         assert "memories=memories" in source
+
+
+class TestFullscreenDetection:
+    """V0015：全屏判定逻辑。
+
+    该函数此前连续踩过三个坑（``ctypes.wintypes`` 未导入 → 误用
+    ``QApplication.winId()`` → 未防 ``_floating_pet`` 为 ``None``），根因是整段
+    逻辑耦合了 Win32 API、无法被单测覆盖，只能靠真机日志一个个发现。
+    现把判定抽成模块级纯函数 ``should_report_fullscreen`` 以便真正覆盖。
+    """
+
+    def test_own_window_is_not_fullscreen(self):
+        """桌宠自身窗口不能算全屏，否则一切都前台就会自己沉底消失。"""
+        assert main.should_report_fullscreen(
+            foreground_hwnd=100, own_hwnd=100,
+            fg_width=1920, fg_height=1080,
+            screen_width=1920, screen_height=1080,
+        ) is False
+
+    def test_no_foreground_window(self):
+        """无前台窗口（hwnd=0）时不应判定为全屏。"""
+        assert main.should_report_fullscreen(0, 100, 1920, 1080, 1920, 1080) is False
+
+    def test_zero_screen_size_guarded(self):
+        """屏幕尺寸异常时保守返回 False，避免除零/误判。"""
+        assert main.should_report_fullscreen(100, 0, 100, 100, 0, 0) is False
+
+    def test_exact_threshold_counts_as_fullscreen(self):
+        """恰好达到 95%（1920×0.95=1824, 1080×0.95=1026）应算全屏。"""
+        assert main.should_report_fullscreen(100, 200, 1824, 1026, 1920, 1080) is True
+
+    def test_below_threshold_is_not_fullscreen(self):
+        """宽度差 4px 未达阈值即不算全屏。"""
+        assert main.should_report_fullscreen(100, 200, 1820, 1026, 1920, 1080) is False
+
+    def test_width_alone_is_not_enough(self):
+        """只有宽度达标、高度不足时不算全屏。"""
+        assert main.should_report_fullscreen(100, 200, 1920, 900, 1920, 1080) is False
+
+    def test_uses_pet_window_handle(self):
+        """必须取桌宠窗口的 winId，而非 QApplication（后者没有该方法）。"""
+        source = inspect.getsource(main.VelApplication._check_idle_and_fullscreen)
+        assert "self.winId()" not in source, (
+            "VelApplication 继承自 QApplication，没有 winId()；应使用 self._floating_pet.winId()"
+        )
+        assert "self._floating_pet.winId()" in source
+        assert "self._floating_pet is not None" in source, (
+            "self._floating_pet 初始化为 None，必须判空后再使用"
+        )

@@ -20,6 +20,7 @@
 | V0012 | 2026-11-10 | **P1** | ✅ 已修复 | `_search_duckduckgo_lib` 函数体不完整：取得 `DDGS` 后**没有任何调用**即隐式返回 `None` → 库通道永久失效，搜索一直落到 Bing/SearXNG/API（装不装 ddgs 都一样） | `services/search_service.py` |
 | V0013 | 2026-11-10 | **P1** | ✅ 已修复 | `generate_stream()` 缺 `memories` 参数，而 `chat_manager._stream_generate` 以 `memories=memories` 调用 → **流式对话每次都抛 TypeError 并被静默降级**为非流式 | `services/llm_service.py` |
 | V0014 | 2026-11-10 | **P1** | ✅ 已修复 | `_check_idle_and_fullscreen` 使用 `ctypes.wintypes.RECT()` 但只 `import ctypes`（子模块需显式导入）→ **每 5 秒抛 AttributeError**，全屏/闲置检测完全失效且日志被同一异常刷屏 | `main.py` |
+| V0015 | 2026-11-10 | **P1** | ✅ 已修复 | 同一函数误用 `self.winId()`（`VelApplication` 继承 `QApplication`，**无此方法**），且未防 `_floating_pet` 为 `None`、`primaryScreen()` 可能为 `None` → 修完 V0014 后继续每 5 秒报错 | `main.py` |
 
 ---
 
@@ -162,3 +163,28 @@
 - **修法**：方法体内补 `import ctypes.wintypes`。
 - **测试**：`test_main_guards.py` 3 项 —— 用 `inspect.getsource` 断言方法体含该导入
   （防再次被删），并验证 `ctypes.wintypes.RECT()` 可正常构造。
+
+### V0015 · 同一函数的第三个崩溃点，根因是无法单测 ✅ 已修复（2026-11-10，P1）
+
+- **发现途径**：修复 V0014 后真机重跑，同一函数立刻抛出**下一个**错误：
+  ```
+  AttributeError: 'VelApplication' object has no attribute 'winId'
+  ```
+- **缺陷（三处，一次修完）**：
+  1. `self.winId()` —— `VelApplication` 继承 `QApplication`，**没有 `winId()`**（那是
+     `QWidget` 的方法）；应取桌宠窗口 `self._floating_pet.winId()`；
+  2. `self._floating_pet` 初始化为 `None`（`main.py:43`），代码未判空；
+  3. `QApplication.primaryScreen()` 可能返回 `None`，随后 `.geometry()` 会崩。
+- **根因反思**：该函数连续三个 bug（V0014 → V0015）都是"修完露出下一个"，说明
+  **它从未成功执行过**；而此前只写了 `inspect.getsource` 的源码级断言，这种断言
+  能查"某行在不在"，查不出"逻辑对不对"。
+- **修法**：
+  - 把全屏判定抽成模块级纯函数 `should_report_fullscreen(...)`（与
+    `compute_frame_rect` 等项目内既有纯函数风格一致），使核心逻辑可真正被单测覆盖；
+  - `_check_idle_and_fullscreen` 改为：`_floating_pet is None` 时整体跳过；取
+    `self._floating_pet.winId()`；`primaryScreen()` 为 `None` 时只记 debug 并跳过；
+  - 顺带修正行为：`check_fullscreen(is_fullscreen)` 现在总会调用（原实现自身为前台
+    时不调用，导致桌宠可能卡在"下沉"状态无法复位）。
+- **测试**：`TestFullscreenDetection` 7 项 —— 6 项覆盖纯函数（自身窗口不算全屏、
+  无前台窗口、屏幕尺寸为 0、恰好 95% 达标、差 4px 不达标、只有宽度达标），
+  1 项守卫方法体（断言不含 `self.winId()`、含 `self._floating_pet.winId()` 与判空）。

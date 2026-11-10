@@ -12,7 +12,7 @@ window:
   pet_size_max: 350
 
 llm:
-  model: "qwen2.5:7b-instruct-q4_K_M"
+  model: "qwen2.5:7b"
   host: "127.0.0.1"
   port: 11434
   timeout: 60       # 冷启动首次请求会触发模型加载，放宽到 60s
