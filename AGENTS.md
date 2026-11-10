@@ -77,6 +77,7 @@ Windows 10/11 x64 单人内测的拟人化猫系 AI 桌宠。提供长期记忆�
 | 数据库表结构变更 | 必须新增 `data/db/migrations/` SQL 脚本，并同步 `data/db/schema.sql` |
 | 素材体检工具（动画帧一致性检查） | `tools/check_anim_frames.py` |
 | 动画帧生成工具（单张静态图 → 帧序列，解决帧间不一致） | `tools/gen_pet_frames.py` |
+| 事件断链审计（发布/订阅匹配，查"静默失效"） | `tools/audit_events.py` |
 | 单元测试 | `tests/unit/`（每完成一个模块必须同步补） |
 
 ---
