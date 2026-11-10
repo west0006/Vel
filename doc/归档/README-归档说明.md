@@ -51,3 +51,27 @@
 ## 三、命名映射（重构时的旧 → 新）
 
 `z.document/` → `doc/` 重构过程中，未删除任何文件。完整映射表见 `doc/README.md` §三。
+
+---
+
+## 四、2026-11-10 追加归档（路线否决类）
+
+### 4. `方案-Lottie动画迁移-路线已否决.md`
+
+| 项 | 内容 |
+|---|---|
+| **原名** | `dev/方案-Lottie动画迁移.md` |
+| **归档日期** | 2026-11-10 |
+| **性质** | Lottie 动画迁移方案（After Effects → Bodymovin JSON → rlottie-python → QPixmap） |
+| **归档原因** | **路线已被否决**：`CURRENT-STATUS.md` §六 D-001 / D-003 与 `AGENTS.md` §七 明确「不做 Lottie」。否决理由（需要 AE 技能、与像素猫形象不匹配）记录在 `dev/方案-动画与气泡系统设计笔记.md` §4.2，信息不会丢失 |
+| **现行依据** | `reference/设计-像素猫动画规格-v2.1.md`（素材规格）+ `dev/方案-动画表现力提升.md`（提升计划） |
+
+### 5. `调研-Lottie Creator MCP-路线已否决.md`
+
+| 项 | 内容 |
+|---|---|
+| **原名** | `knowledge/调研-Lottie Creator MCP.md` |
+| **归档日期** | 2026-11-10 |
+| **性质** | Lottie Creator MCP 外部工具能力调研（409 行） |
+| **归档原因** | 同 4 —— Lottie 路线已否决，该工具调研失去开发价值，留在 `knowledge/` 会让人误以为仍在考虑 Lottie |
+| **保留价值** | 若将来重新评估 Lottie 路线，可作为工具能力底稿 |
