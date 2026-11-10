@@ -194,9 +194,40 @@ class TestResilience:
         reply = manager.process_message("你好")
         assert reply, "LLM 异常时应返回降级回复而非抛错"
 
-    def test_clear_context_resets_turn_count(self, manager, clean_registry):
+    def test_clear_context_resets_turn_count_and_session(self, manager, clean_registry):
         clean_registry.register("llm_service", _FakeLLM("ok"))
         manager.initialize()
         manager.process_message("你好")
+        assert manager.get_display_history(), "清除前应能看到本轮消息"
+
         manager.clear_context()
+
         assert manager.get_turn_count() == 0
+        assert manager._history_cache == []
+        assert manager.get_display_history() == []
+
+    def test_clear_context_keeps_archive(self, manager, clean_registry):
+        clean_registry.register("llm_service", _FakeLLM("ok"))
+        manager.initialize()
+        manager.process_message("旧消息")
+        db = clean_registry.get("database")
+        before = db.execute(
+            "SELECT COUNT(*) FROM conversation_archive").fetchone()[0]
+        assert before > 0
+
+        manager.clear_context()
+
+        after = db.execute(
+            "SELECT COUNT(*) FROM conversation_archive").fetchone()[0]
+        assert after == before, "只清本轮上下文，不应删除历史存档"
+
+    def test_after_clear_only_new_messages_are_displayed(self, manager, clean_registry):
+        clean_registry.register("llm_service", _FakeLLM("ok"))
+        manager.initialize()
+        manager.process_message("旧消息")
+        manager.clear_context()
+
+        manager._save_to_archive("user", "新消息")
+
+        display = manager.get_display_history()
+        assert [h["content"] for h in display] == ["新消息"]

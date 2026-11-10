@@ -308,6 +308,23 @@ class SettingsWindow(QDialog):
 
     # --- 健康 ---
 
+    @staticmethod
+    def _bind_slider_value_label(slider: QSlider, label: QLabel, suffix: str) -> None:
+        """让滑块当前值实时显示在标签上。
+
+        Args:
+            slider: 数值滑块。
+            label: 用于显示数值的标签。
+            suffix: 单位，如“分钟”。
+        """
+        label.setStyleSheet(
+            f"{Fonts.style(Fonts.SIZE_XS, 400)} color: {Colors.TEXT_PLACEHOLDER};"
+        )
+        label.setText(f"{slider.value()} {suffix}")
+        slider.valueChanged.connect(
+            lambda value: label.setText(f"{value} {suffix}")
+        )
+
     def _page_health(self) -> QWidget:
         layout, w = self._page_wrap()
         # layout.addWidget(self._section("健康"))
@@ -331,8 +348,11 @@ class SettingsWindow(QDialog):
         self._sed_slider = QSlider(Qt.Horizontal)
         self._sed_slider.setRange(30, 90)
         self._sed_slider.setValue(self._get_int("sedentary_threshold_min", 50))
+        self._sed_value_label = QLabel()
+        self._bind_slider_value_label(self._sed_slider, self._sed_value_label, "分钟")
         self._sed_slider.valueChanged.connect(self._apply_health)
         layout.addWidget(self._sed_slider)
+        layout.addWidget(self._sed_value_label)
 
         layout.addWidget(QLabel("活动类型"))
         self._activity_checks = {}
@@ -349,8 +369,11 @@ class SettingsWindow(QDialog):
         self._drk_slider = QSlider(Qt.Horizontal)
         self._drk_slider.setRange(30, 60)
         self._drk_slider.setValue(self._get_int("drink_interval_min", 45))
+        self._drk_value_label = QLabel()
+        self._bind_slider_value_label(self._drk_slider, self._drk_value_label, "分钟")
         self._drk_slider.valueChanged.connect(self._apply_health)
         layout.addWidget(self._drk_slider)
+        layout.addWidget(self._drk_value_label)
 
         layout.addStretch()
         return w
@@ -487,7 +510,7 @@ class SettingsWindow(QDialog):
         try:
             cm = registry.get("chat_manager")
             if not cm: return
-            for h in reversed(cm.get_history(50)):
+            for h in reversed(cm.get_display_history(50)):
                 icon = "👤" if h["role"] == "user" else "🐱"
                 self._chat_list.addItem(f"{icon} {(h.get('content') or '')[:80]}")
         except Exception:
@@ -495,8 +518,21 @@ class SettingsWindow(QDialog):
 
     def _clear_context(self) -> None:
         cm = registry.get("chat_manager")
-        if cm: cm.clear_context()
+        if not cm:
+            QMessageBox.warning(self, "清除失败", "对话管理器尚未就绪")
+            return
+        cm.clear_context()
+
+        bubble = registry.get("chat_bubble")
+        clear_messages = getattr(bubble, "clear_messages", None)
+        if clear_messages:
+            clear_messages()
+
         self._refresh_chat()
+        QMessageBox.information(
+            self, "已清除",
+            "本轮对话上下文已清除。\n历史存档仍保留，可在“数据”页导出。",
+        )
 
     # --- 外观 ---
 

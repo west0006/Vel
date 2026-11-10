@@ -34,6 +34,7 @@ class ChatManager:
         self._turn_count = 0
         self._summary_interval = summary_interval
         self._history_cache: List[Dict[str, Any]] = []  # 内存 LRU，最多 100 条
+        self._context_cleared = False  # True 时设置页只显示清除后的新消息
 
 
     # ────────────── 初始化 ──────────────
@@ -45,6 +46,20 @@ class ChatManager:
         self._profile_manager = registry.get("profile_manager")
         self._mood_logger = registry.get("mood_logger")
         logger.info("对话管理器初始化完成")
+
+    def _get_memory_service(self) -> Any:
+        """惰性获取记忆服务。
+
+        ``MemoryService`` 由后台线程加载，可能晚于 ``initialize()`` 注册；
+        若初始化时没拿到，这里在每次使用时重试，避免把 ``None`` 永久固化。
+        拿到后缓存，后续调用不再访问注册表。
+
+        Returns:
+            记忆服务实例；尚未注册时返回 ``None``。
+        """
+        if self._memory_service is None:
+            self._memory_service = registry.get("memory_service")
+        return self._memory_service
 
     def set_user_name(self, name: str) -> None:
         self._prompt_builder.set_user_name(name)
@@ -182,10 +197,11 @@ class ChatManager:
     # ────────────── 记忆 ──────────────
 
     def _retrieve_memories(self, user_input: str) -> List[str]:
-        if not self._memory_service:
+        memory_service = self._get_memory_service()
+        if not memory_service:
             return []
         try:
-            memories = self._memory_service.search(user_input, top_k=3, min_score=0.4)
+            memories = memory_service.search(user_input, top_k=3, min_score=0.4)
             texts = [m["summary"] for m in memories]
             if texts:
                 bus.publish("CONTEXT_HINT", {"text": f"想起了 {len(texts)} 段相关记忆~"})
@@ -262,6 +278,22 @@ class ChatManager:
             logger.warning(f"获取历史失败: {e}")
             return []
 
+    def get_display_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """返回设置页应显示的对话历史。
+
+        未清除本轮上下文时沿用 ``get_history()``（内存缓存优先，重启后回退存档）；
+        清除后只显示清除之后的新消息，避免旧存档立刻把列表填回去。
+
+        Args:
+            limit: 最多返回条数。
+
+        Returns:
+            对话消息列表（时间正序）。
+        """
+        if self._context_cleared:
+            return self._history_cache[-limit:]
+        return self.get_history(limit)
+
     # ────────────── 情绪 ──────────────
 
     def _analyze_mood(self, text: str) -> None:
@@ -327,8 +359,9 @@ class ChatManager:
             except Exception:
                 logger.exception("_trigger_summary 执行失败")
 
-        if self._memory_service:
-            self._memory_service.add_memory(
+        memory_service = self._get_memory_service()
+        if memory_service:
+            memory_service.add_memory(
                 summary=summary, category="event", importance=5,
             )
 
@@ -338,7 +371,9 @@ class ChatManager:
         if self._llm:
             self._llm.clear_history()
         self._turn_count = 0
-        logger.info("对话上下文已清空")
+        self._history_cache.clear()
+        self._context_cleared = True
+        logger.info("本轮对话上下文已清空（历史存档保留）")
 
     def get_turn_count(self) -> int:
         return self._turn_count
