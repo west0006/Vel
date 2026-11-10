@@ -39,7 +39,10 @@ from PIL import Image
 # 与 ui/floating_pet.py 保持一致的画布与对齐参数
 CANVAS = 512
 BOTTOM_RATIO = 0.96
-SUBJECT_HEIGHT = int(CANVAS * 0.86)      # 主体高度（与 FRAME_TARGET_HEIGHT_RATIO 一致）
+SUBJECT_HEIGHT = int(CANVAS * 0.78)      # 主体高度
+# 说明：从 0.86 降到 0.78 是为 squash & stretch 留出**向上**空间 ——
+# 起跳帧同时要「拉长 1.10 倍」+「上移 34px」，主体 440 时会超出画布顶部被裁切。
+# 512 画布、底部基线 491 前提下，主体 400 时最极端帧顶部约 25px，安全。
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_SOURCE = os.path.join(PROJECT_ROOT, "ui", "resources", "animations", "cat_1.png")
@@ -49,24 +52,34 @@ OUT_ROOT = os.path.join(PROJECT_ROOT, "ui", "resources", "animations", "pet_png"
 #: dy: 垂直偏移（负=上移，模拟跳跃/呼吸）；scale_y: 纵向缩放（1.0 不变）；
 #: angle: 旋转角度（度）；每项对应一帧。
 EMOTION_RULES: Dict[str, List[Dict[str, float]]] = {
-    # 平静：轻微呼吸起伏（首尾相接，循环不跳）
-    "idle": [{"dy": 0}, {"dy": -3}, {"dy": -6}, {"dy": -3}],
-    # 刚醒：纵向拉伸 + 上移（伸懒腰）
-    "wake": [{"dy": 0}, {"dy": -8, "scale_y": 1.05}, {"dy": -15, "scale_y": 1.09},
-             {"dy": -5, "scale_y": 1.03}],
-    # 思考：歪头（角度加大到 6~11°）
+    # 平静：呼吸起伏 + 极轻微纵向形变（吸气时略高）
+    "idle": [{"dy": 0}, {"dy": -3, "scale_y": 1.01}, {"dy": -6, "scale_y": 1.02},
+             {"dy": -3, "scale_y": 1.01}],
+    # 刚醒：先缩一下再舒展拉长（伸懒腰的挤压拉伸）
+    "wake": [{"dy": 0, "scale_y": 0.95}, {"dy": -8, "scale_y": 1.06},
+             {"dy": -15, "scale_y": 1.10}, {"dy": -5, "scale_y": 1.03}],
+    # 思考：歪头
     "thinking": [{"dy": 0}, {"dy": -3, "angle": -6}, {"dy": -5, "angle": -11}],
-    # 困倦：最慢最小的呼吸
-    "sleep": [{"dy": 0}, {"dy": -3}, {"dy": -6}, {"dy": -3}],
-    # 低落：下沉 + 低头（正向旋转）
-    "sad": [{"dy": 0}, {"dy": 5, "angle": 4}, {"dy": 9, "angle": 7}],
-    # 开心：跳跃（幅度加大：512 画布 → 256 窗口约 23px 位移）
-    "happy": [{"dy": 0}, {"dy": -28}, {"dy": -46}, {"dy": -12}],
-    # 警觉：上移 + 放大（竖起来）
-    "alert": [{"dy": 0, "scale_y": 1.0}, {"dy": -8, "scale_y": 1.05},
+    # 困倦：极慢极小的呼吸
+    "sleep": [{"dy": 0, "scale_y": 0.99}, {"dy": -3, "scale_y": 1.01},
+              {"dy": -6, "scale_y": 1.02}, {"dy": -3, "scale_y": 1.01}],
+    # 低落：整体被压矮 + 低头
+    "sad": [{"dy": 0, "scale_y": 0.97},
+            {"dy": 5, "scale_y": 0.96, "angle": 4},
+            {"dy": 9, "scale_y": 0.94, "angle": 7}],
+    # 开心：蓄力压扁 → 起跳拉长 → 滞空 → 落地再压（体积守恒的 squash & stretch）
+    "happy": [{"dy": 0, "scale_y": 0.90, "scale_x": 1.07},
+              {"dy": -34, "scale_y": 1.08, "scale_x": 0.94},
+              {"dy": -52, "scale_y": 1.00, "scale_x": 1.00},
+              {"dy": -8, "scale_y": 0.93, "scale_x": 1.05}],
+    # 警觉：突然竖起来（纵向拉长、横向收窄）
+    "alert": [{"dy": 0, "scale_y": 1.0},
+              {"dy": -8, "scale_y": 1.06, "scale_x": 0.97},
               {"dy": -6, "scale_y": 1.03}],
-    # 疲惫：下沉 + 压扁（瘫下去）
-    "collapsed": [{"dy": 0}, {"dy": 12, "scale_y": 0.93}, {"dy": 18, "scale_y": 0.90}],
+    # 疲惫：瘫软压扁 + 横向摊开
+    "collapsed": [{"dy": 0, "scale_y": 1.0},
+                  {"dy": 12, "scale_y": 0.93, "scale_x": 1.03},
+                  {"dy": 18, "scale_y": 0.90, "scale_x": 1.05}],
 }
 
 
@@ -121,12 +134,20 @@ def normalize_subject(img: Image.Image) -> Image.Image:
 
 
 def transform(subject: Image.Image, rule: Dict[str, float]) -> Image.Image:
-    """对主体应用单帧变换（缩放 / 旋转），返回变换后的图像。"""
+    """对主体应用单帧变换（非均匀缩放 / 旋转），返回变换后的图像。
+
+    支持 ``scale_x`` / ``scale_y`` / ``angle``。**两者同时给**即构成
+    squash & stretch（挤压拉伸）：压扁时横向变宽、拉长时横向变窄，
+    保持视觉体积大致守恒 —— 这是让"跳跃"看起来有重量感的关键，
+    单纯的纵向平移看起来只是"整体上下移动"。
+    """
     frame = subject
+    scale_x = float(rule.get("scale_x", 1.0))
     scale_y = float(rule.get("scale_y", 1.0))
-    if abs(scale_y - 1.0) > 1e-6:
+    if abs(scale_x - 1.0) > 1e-6 or abs(scale_y - 1.0) > 1e-6:
+        new_w = max(1, int(round(frame.width * scale_x)))
         new_h = max(1, int(round(frame.height * scale_y)))
-        frame = frame.resize((frame.width, new_h), Image.NEAREST)
+        frame = frame.resize((new_w, new_h), Image.NEAREST)
     angle = float(rule.get("angle", 0.0))
     if abs(angle) > 1e-6:
         # expand=False + 底部对齐可避免旋转后凭空长高
