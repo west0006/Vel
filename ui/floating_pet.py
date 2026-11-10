@@ -28,6 +28,8 @@ FRAME_TARGET_WIDTH_RATIO = 0.94    # 归一化目标宽度上限占预渲染宽�
 FRAME_AREA_FILL = 0.92             # 目标面积填充系数（按面积归一化：人眼对面积更敏感）
 FRAME_SCALE_LIMITS = (0.40, 3.00)  # 极端缩放保护（避免异常帧被放大到失真）
 FRAME_BOTTOM_RATIO = 0.96          # 主题底部在窗口中的相对位置（留白 4%）
+#: 未配置逐帧时长的情绪所用的兜底帧间隔（毫秒）
+FRAME_INTERVAL_FALLBACK = 150
 ALPHA_THRESHOLD = 30               # 不透明判定阈值（绘制与点击判定共用）
 
 
@@ -362,10 +364,21 @@ class FloatingPet(QWidget):
         self._edge_anim.setDuration(200)
         self._edge_anim.setEasingCurve(QEasingCurve.InOutCubic)
 
-    # 每情绪帧间隔(ms)
-    EMOTION_INTERVALS = {
-        "idle": 150, "wake": 80, "thinking": 120, "sleep": 200,
-        "sad": 120, "happy": 100, "alert": 100, "collapsed": 200,
+    # 逐帧时长（毫秒）：**同一情绪内每帧可以不同**。
+    # 为什么不用"每情绪一个间隔"：单值等于匀速播放，动作会缺少真动作的
+    # 预备（anticipation）→ 发力（action）→ 回落（settle）节奏。
+    # 逐帧时长可让中途帧快、首尾帧慢，这是"看得出在做什么"的关键。
+    # 数组长度须与该情绪的帧数一致（帧目录见 ui/resources/animations/pet_png/），
+    # 一致性由 tests/unit/test_frame_norm.py 守护。
+    EMOTION_FRAME_MS = {
+        "idle":      [260, 140, 140, 260],   # 呼吸：慢—快—快—慢，首尾留停顿
+        "wake":      [220, 90, 260, 320],    # 伸懒腰：预备→发力→舒展→回落
+        "thinking":  [260, 200, 340],        # 歪头：慢起→停住
+        "sleep":     [420, 260, 260, 420],   # 慢呼吸（比 idle 更慢）
+        "sad":       [220, 220, 320],        # 下沉：逐渐低落
+        "happy":     [180, 70, 320, 140],    # 跳跃：蓄力→起跳→滞空→落地
+        "alert":     [120, 140, 320],        # 警觉：突然竖起→保持
+        "collapsed": [300, 280, 380],        # 瘫下：逐渐失去力气
     }
 
     # 呼吸形变：周期（秒）与幅度（±1.6%）
@@ -500,10 +513,24 @@ class FloatingPet(QWidget):
                 self._frame_idx = len(frames) - 1
                 self.set_emotion(self._after, loop=True)
                 return
-        # 动态帧间隔
-        interval = self.EMOTION_INTERVALS.get(self._emotion, 100)
-        self._anim_timer.setInterval(interval)
+        # 逐帧时长（同一情绪内每帧可不同，用于制造动作节奏）
+        self._anim_timer.setInterval(self._frame_interval_ms())
         self.update()
+
+    def _frame_interval_ms(self) -> int:
+        """返回**当前帧**应停留的毫秒数。
+
+        取当前情绪逐帧时长数组的第 ``_frame_idx`` 项；索引越界时取最后一项，
+        情绪未配置时回退 ``FRAME_INTERVAL_FALLBACK``。
+
+        Returns:
+            帧间隔毫秒数。
+        """
+        durations = self.EMOTION_FRAME_MS.get(self._emotion)
+        if not durations:
+            return FRAME_INTERVAL_FALLBACK
+        index = min(max(self._frame_idx, 0), len(durations) - 1)
+        return durations[index]
 
     def _breath_scale(self) -> float:
         """返回当前呼吸缩放系数（以窗口底部为锚点，纵向轻微起伏）。"""
@@ -565,6 +592,9 @@ class FloatingPet(QWidget):
             return
         self._emotion = emotion
         self._frame_idx = 0
+        # 立即应用新情绪**首帧**的时长：否则该帧会沿用上一个情绪的间隔，
+        # 导致「切过去的第一帧时长是错的」（原实现即有此缺陷）。
+        self._anim_timer.setInterval(self._frame_interval_ms())
         self._loop = loop
         self._after = after
         # 同步特效层并触发淡入（情绪切换是低频操作，淡化在此处才有意义）

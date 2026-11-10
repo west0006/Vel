@@ -21,8 +21,10 @@ from PyQt5.QtWidgets import QApplication
 
 from ui.floating_pet import (
     FRAME_BOTTOM_RATIO,
+    FRAME_INTERVAL_FALLBACK,
     FRAME_RENDER_SIZE,
     KNOWN_EMOTIONS,
+    FloatingPet,
     _alpha_bbox,
     _load_frames,
     compute_frame_rect,
@@ -149,3 +151,72 @@ class TestLoadFrames:
                 assert box is not None
                 assert box.width() >= frame.width() * 0.9
                 assert box.height() >= frame.height() * 0.9
+
+
+class TestFrameDurations:
+    """逐帧时长：替代「每情绪一个间隔」的匀速播放。
+
+    背景：`happy` 原本 4 帧 × 100ms = 400ms 就播完，低于人眼感知「一个动作」所需的
+    600~1000ms，所以看起来只是"抖了一下"而不是"跳起来"
+    （诊断见 `doc/dev/方案-动画表现力提升.md` 的 R1/R2）。
+    """
+
+    @pytest.fixture
+    def pet(self, qt_app):
+        """构造真实桌宠窗口（帧已由 pet_png 提供，加载很快）。"""
+        widget = FloatingPet()
+        yield widget
+        widget.close()
+
+    def test_interval_follows_frame_index(self, pet):
+        """每帧应使用自己配置的时长，而不是整段同一个值。"""
+        pet.set_emotion("thinking")
+        durations = pet.EMOTION_FRAME_MS["thinking"]
+        for index, expected in enumerate(durations):
+            pet._frame_idx = index
+            assert pet._frame_interval_ms() == expected
+
+    def test_switching_emotion_applies_first_frame_duration(self, pet):
+        """切换情绪后，定时器应立刻采用新情绪的**首帧**时长。
+
+        原实现只在 `_advance_frame` 里重设间隔，切过去的第一帧会沿用上一个
+        情绪的时长（例如从 idle 的 260ms 切到 happy 本应 180ms，却先跑 260ms）。
+        """
+        pet.set_emotion("idle")
+        assert pet._anim_timer.interval() == pet.EMOTION_FRAME_MS["idle"][0]
+
+        pet.set_emotion("happy")
+        assert pet._anim_timer.interval() == pet.EMOTION_FRAME_MS["happy"][0]
+
+    def test_index_overflow_uses_last(self, pet):
+        """帧索引越界时取最后一项，而不是抛异常。"""
+        pet.set_emotion("alert")
+        pet._frame_idx = 99
+        assert pet._frame_interval_ms() == pet.EMOTION_FRAME_MS["alert"][-1]
+
+    def test_unknown_emotion_falls_back(self, pet):
+        """未配置时长的情绪回退到兜底间隔。"""
+        pet._emotion = "not-an-emotion"
+        assert pet._frame_interval_ms() == FRAME_INTERVAL_FALLBACK
+
+    def test_durations_match_frame_counts(self, qt_app):
+        """守护：每情绪配置的时长项数必须等于素材帧数。
+
+        素材重生成后帧数可能变化（改 `tools/gen_pet_frames.py` 的 `EMOTION_RULES`），
+        若配置没同步，动作会被截断或循环错位 —— 这条测试负责发现它。
+        """
+        # EMOTION_FRAME_MS 是 FloatingPet 的类属性，故经类访问
+        for emotion, durations in FloatingPet.EMOTION_FRAME_MS.items():
+            frames = _load_frames(emotion)
+            assert frames, f"{emotion} 无帧素材"
+            assert len(durations) == len(frames), (
+                f"{emotion}: 配置 {len(durations)} 项时长，素材实际 {len(frames)} 帧"
+            )
+
+    def test_single_shot_actions_long_enough(self):
+        """验收：单次动作（loop=False）总时长应落在可感知区间 600~1000ms。"""
+        for emotion in ("happy", "wake"):
+            total = sum(FloatingPet.EMOTION_FRAME_MS[emotion])
+            assert 600 <= total <= 1000, (
+                f"{emotion} 总时长 {total}ms 超出 600~1000ms 的可感知区间"
+            )
