@@ -1,116 +1,132 @@
 # 工作现状快照 · CURRENT-STATUS
 
-> **Agent 每轮任务开始前必读本文件。**
-> 快照日期：**2026-10-08** ｜ 依据：本仓库代码 + 回归测试（`.venv/Scripts/python.exe -m pytest tests -q` → **42 passed**）
+> **快照日期：2026-11-10** ｜ 依据：本仓库代码 + 全量回归
+> （`venv/Scripts/python.exe -m pytest tests -q` → **297 passed / 8 warnings**）
+>
 > 本文件描述"现在是什么样"，不是"计划要做什么"。未真机验证的条目已标注。
+> 上一版快照停留在 2026-10-08，其中动画路线、回归数、集成测试与待办数量已失真；
+> 本次修正明细见 §八（保留修正记录，便于下次判断"这份快照可信到什么程度"）。
 
 ---
 
 ## 一、当前在做什么
 
-**动画路线已定案**：形象固定为**像素猫** → 采用 **SVG 部件分层 + 代码程序驱动**，不引入 Live2D/OpenGL、不做 Lottie。
+**动画表现力 P1~P4 已落地（2026-11-10）**：帧素材改为「单图程序化生成」
+（`ui/resources/animations/pet_png/`，9 个情绪目录 / 31 帧），并完成逐帧时长（P1）、
+特效时长对齐（P2）、squash & stretch（P3）、拖拽反馈（P4）。
+P5（补姿态图）视 P1~P3 的观感再定，**未开工**。
+> ⚠️ P1~P4 有单测与渲染诊断支撑，**尚无"真机肉眼验收通过"的记录**。
 
-**配置体系已接线**（2026-10-08）：新增 `core/config.py` 统一入口，优先级 `app_settings`（用户修改）> `config/settings.yaml`（出厂默认）> 代码兜底 —— `settings.yaml` 从此**真正生效**（此前是死配置）。
+**当前优先处理两个"静默失效"**（AST 审计 + 代码核实，详见 `dev/计划/计划-当前待办.md`）：
 
-下一步是 P2 交互增强三件套（随机微动作 / 视线跟随 / 抚摸反馈），它们共用这条动画路线，也是待办里唯一成组的前置依赖。
+- **EMO-1**：情绪信号无出口 —— `EVENT_MOOD_DETECTED`（`mood_detected`）有**两个**发布方
+  （`chat_manager._analyze_mood`、`mood_logger.analyze`），**零订阅者**；
+  彩蛋 `match()` 返回的 `emotion` 被 `process_message` 丢弃。
+- **NOTIFY-1**：习惯 / 备忘录 / 番茄钟的提醒只 `bus.publish`，
+  `HABIT_*` / `MEMO_REMINDER` / `POMODORO_PAUSE|RESUME|CANCEL` 均无订阅者，
+  用户完全看不到提醒（`POMODORO_END` 的订阅方只恢复久坐计时）。
 
-✅ **无环境阻断**：LLM 对话已由用户实测通过。此前记录的 V0004（"无可用模型"）已**撤回** —— 模型存放于移动硬盘，`ollama list` 为空只是未挂载所致（教训见 `testing/buglist.md` V0004）。
-
-**当前唯一的技术卡点就是动画**（用户 2026-10-08 确认）；其余待办见 `dev/计划-当前待办.md` —— 经代码核实**仅 3 项未完成**。
+**环境**：无阻断。LLM 对话已由用户实测可用（V0004 已撤回）。
+"LLM 输出特别慢"已定位为模型反复重载（V0016），已用 `keep_alive="30m"` +
+固定 `num_ctx=4096` 缓解（V0016 遗留：跨客户端 `num_ctx` 不一致仍会触发重载）。
 
 ---
 
-## 二、已就绪的能力（代码快照）
+## 二、已就绪的能力（2026-11-10 代码快照）
 
 ### 2.1 骨架层
 
 | 能力 | 位置 | 状态 |
 |---|---|---|
-| 事件总线（sync/async/UI 线程安全） | `core/event_bus.py` | ✅ 有单测 |
-| 状态机（用户状态 / 桌宠模式） | `core/state_manager.py` | ✅ 有单测 |
-| 服务注册表 | `core/service_registry.py` | ✅ |
-| 模型管理器（VRAM 预算、加载/卸载） | `core/model_manager.py` | ✅ |
+| 事件总线（sync/async/UI 线程安全） | `core/event_bus.py` | ✅ 有单测 + 集成测试 |
+| 统一配置（`app_settings` > `settings.yaml` > 兜底） | `core/config.py` | ✅ 有单测 |
+| 状态机 / 服务注册表 / 模型管理器 | `core/state_manager.py` · `service_registry.py` · `model_manager.py` | ✅ |
 | 日志 / 加密 / 系统信息 | `utils/` | ✅ |
 | 应用装配（启动顺序、服务注册、快捷键） | `main.py` | ✅ |
 
 ### 2.2 服务层
 
-`services/`：`llm_service`（Ollama）· `memory_service`（FAISS + 嵌入）· `search_service`（降级链）· `location_service`（高德）· `ocr_service` · `stt_service` · `tts_service` · `tool_executor` · `update_service`
+| 服务 | 状态 |
+|---|---|
+| `llm_service`（Ollama） | ✅ 降级可恢复；`keep_alive` / `num_ctx` 已接配置（V0016） |
+| `memory_service`（FAISS + sentence-transformers） | ✅ 后台初始化，含死向量压缩 |
+| `search_service`（Bing → ddgs → 旧包 → API） | ✅ 库通道已修复（V0012） |
+| `location_service`（高德免费层） | ✅ 无 key 时自动禁用 |
+| `tool_executor` | ✅ 已注册 |
+| `update_service` | 📋 占位骨架，**未接线**（设计阶段 7，V0011） |
+| `ocr_service` / `stt_service` / `tts_service` | 📋 Alpha 仅留接口，**未注册** |
 
 ### 2.3 业务模块
 
-`modules/`：
-- `chat/`（对话编排 + 人格提示词构建；**流式已完整接线**：`generate_stream` → `set_stream_callback` → `chat_bubble.stream_append`）
-- `schedule/`（解析 · 重复规则 · 调度 · 存储，解析器有单测）
-- `health/`（饮水 · 久坐 · 用餐 · 睡眠 · 情绪记录，情绪有单测）
-- `personality/`（抽取 · 遗忘曲线 · 档案管理）
-- 单文件模块：`diary` · `memo` · `habit` · `pomodoro` · `greeting` · `easter_egg`
-- `onboarding/wizard.py`（引导向导）
+- `chat/`：对话编排 + 人格提示词；**流式已完整接线**（`generate_stream` →
+  `set_stream_callback` → `chat_bubble.stream_append`）；彩蛋主动推送 + `_worker` 兜底（V0017）。
+- `schedule/`：解析 · 重复规则 · 调度 · 存储（解析器有单测）。
+- `health/`：`drink_reminder` · `meal_engine` · `sedentary_monitor` · `sleep_tracker` 由 `main.py` 注册；
+  `mood_logger` 已实现但**未注册**（V0018，待确认），对话情绪分析实际走
+  `chat_manager._fallback_mood_analyze` 关键词兜底。
+- `personality/`：`extractor` · `profile_manager` 已注册；
+  `ForgettingEngine`（遗忘曲线）**全仓无调用、未接线**（V0019，待确认是否本阶段范围）。
+- 单文件模块：`diary` · `memo` · `habit` · `pomodoro` · `greeting` · `easter_egg`。
+- `onboarding/wizard.py`：首次运行引导。
 
 ### 2.4 UI 层
 
-`ui/`：`floating_pet`（悬浮窗 · SVG 帧动画 · 拖拽 · 贴边隐藏）· `chat_bubble`（气泡 · **打字机流式接口 `stream_begin/append/finish`**）· `notification_bubble`（含 `NotificationManager` 优先级排队）· `mini_schedule` · `settings_window` · `system_tray` · `about_dialog` · `theme`
+- `floating_pet`：`pet_png/` 优先（9 情绪 / 31 帧），`pet_svg/`（35 个 `.svg`）回退；
+  呼吸形变 · 视线跟随 · 微动作（`pet_conf.json` 4 个动作）· 拖拽 · 贴边隐藏 · 程序化特效层。
+- `chat_bubble`：打字机流式接口 `stream_begin / stream_append / stream_finish`。
+- `notification_bubble`：含 `NotificationManager` 优先级排队。
+- `mini_schedule` · `settings_window` · `system_tray` · `about_dialog` · `theme` · `pet_fx`。
 
 ### 2.5 测试
 
-`tests/unit/`：`test_event_bus` · `test_state_manager` · `test_schedule_parser` · `test_mood_logger` → **42 passed / 1 warning（sip 弃用，无害）**
-`tests/integration/`：⚠️ **空**，尚无集成场景用例。
+- `tests/unit/`：17 个测试文件；`tests/integration/`：3 个（对话主链 / DB 配置 / 事件总线线程语义）。
+- 全量：**297 passed / 8 warnings**（warnings 为 sip 弃用等，未发现失败）。
+- 未覆盖：GUI 真机交互、Ollama 端到端、搜索/位置网络链路、OCR/语音。
 
 ---
 
-## 三、待办清单
+## 三、待办清单（9 项）
 
-> **来源**：`dev/计划-当前待办.md`（**已按 2026-10-08 逐项代码核实重写**）
-> 原《2.0 冲刺待办清单》15 项经核实 **13 项已实现**，已移入 `归档/`（含失真教训记录）。
+> **唯一来源**：`dev/计划/计划-当前待办.md`（本表仅同步摘要，改动请先改该文件）。
 
-### 3.1 真实未完成（3 项）
-
-| 编号 | 项 | 现状 |
+| 编号 | 项 | 规模 |
 |---|---|---|
-| **P1-2** | 画像结构化显示（按 category 分组 + 段落） | 未实现：现状为 `[category] 摘要 (重要性)` 逐行列表 |
-| **E11-os** | **OS 级**点击穿透 | 未实现：Qt 层已有 alpha 逐像素命中 + `e.ignore()`（`_is_click_on_body`）；代码中无 `WS_EX_TRANSPARENT`。**待决策走哪条路线** |
-| **CFG-2** | 第二批配置接入（`schedule.*` / `window.*` / `memory.decay_half_life_days` / `summary_interval`） | 未实现：仍走代码内默认值 |
+| **EMO-1** | 情绪信号驱动表情（复用现有 `EVENT_MOOD_DETECTED`，覆盖彩蛋与对话两个来源） | 小 |
+| **NOTIFY-1** | 习惯 / 备忘录 / 番茄钟提醒对用户可见 | 中 |
+| **P1-2** | 画像结构化显示（按 `category` 分组 + 段落） | 小 |
+| **E11-os** | OS 级点击穿透（路线待决策） | 中 |
+| **CFG-2** | 第二批配置接入（`schedule.*` / `window.*` / `memory.decay_half_life_days` / `summary_interval`） | 小 |
+| **G1** | 健康看板 UI | 小 |
+| **G2** | 用眼保护（连续 75 分钟检测） | 中 |
+| **G3** | 缺失动画动作（提醒敲屏幕 / 背身偷看） | 中 |
+| **G4** | 喂食与养成系统（**是否在范围内待确认**） | 大 |
 
-### 3.2 已完成（原清单项，逐一经代码核实）
+**编号含义**：`P1` 个性化 · `P2` 交互 · `P3` LLM 渗透 · `E` 1.1 遗留 · `O` 性能优化 · `CFG` 配置类 · `G` 功能深度差距。
 
-| 编号 | 项 | 已实现的证据 |
-|---|---|---|
-| P1-1 | 隐式特质抽取 | `modules/personality/extractor.py` 三层架构（规则 + LLM 摘要层；`_trigger_llm_summary`，按轮数阈值触发） |
-| P2-1 | 随机微动作 | `floating_pet._do_micro_action`（本轮改为 `pet_conf.json` 权重表驱动，4 个动作） |
-| P2-2 | 鼠标视线跟随 | `floating_pet._track_mouse` + `compute_track_offset`（本轮修复限幅 bug） |
-| P2-3 | 抚摸反馈 | `floating_pet._on_petted`（hover 1.5s → happy + "呼噜呼噜~"） |
-| P3-1 | LLM 日记 | `modules/diary.py:32`（优先 LLM，失败回退模板；含 `_llm_diary`） |
-| P3-2 | LLM 健康贴士 | `modules/health/meal_engine.py:122/321`（饮食推荐后追加一句健康小贴士） |
-| P3-3 | 记忆 LLM 提取 | `modules/chat/chat_manager.py:318`（先让 LLM"用一句简短的话总结这段对话的核心内容"，再 `add_memory`） |
-| E5 | 流式对话 | `main.py:545` `set_stream_callback` + `stream_append` / `stream_finish`；`chat_bubble` 有打字机接口 |
-| E16 | 冲突检测缓存 | `modules/schedule/schedule_parser.py:67` `_pending_items`（注释："待入库日程，参与冲突检测"）+ `add_pending` / `clear_pending` |
-| O1 | FAISS 死向量压缩 | `services/memory_service.py` `_deleted_ids` + 死向量 >30% 触发压缩 + `_rebuild_index` |
-| O2 | 对话存档 LRU | `modules/chat/chat_manager.py:36` `_history_cache`（内存缓存最近 100 条） |
-| O3 | 上下文 token 控制 | `max_tokens=512`（本轮已从硬编码改为 `settings.yaml` 配置项 `llm.max_tokens`） |
-| O4 | 启动加载并行化 | `main.py` 三处守护线程：LLM 预热 / 记忆初始化 / 消息处理 |
+---
 
-**编号含义**：`P1` 个性化 · `P2` 交互 · `P3` LLM 渗透 · `E` 1.1 遗留 · `O` 性能优化 · `CFG` 配置类。
+## 四、已知问题
 
-## 四、已知问题（详见 `testing/buglist.md`）
+> 完整台账见 `testing/buglist.md`（V0001~V0019）。
 
 | # | 问题 | 严重度 | 状态 |
 |---|---|---|---|
-| 1 | 动画资源脏目录 `pet_lottie'` | P2 | ✅ 已修复（删除空目录） |
-| 2 | 仓库无 `.gitignore`，38522 个跟踪文件含 `venv/` `__pycache__` `pet.db` `build/` | P2 | ✅ 已修复（→ 159 个跟踪文件，磁盘文件保留） |
-| 3 | `config/settings.yaml` 从未被代码读取 + 配置源分裂（`app_settings` 生效 / yaml 不生效 / 键名两套 / 模型名四处不一致） | **P1** | ✅ 已修复（新增 `core/config.py` 统一入口，接入 `main.py` + 4 个 service + 2 个 health 模块） |
-| 4 | ~~Ollama 中无任何模型~~ → **撤回**：模型存于移动硬盘（未挂载时 `ollama list` 为空），对话已由用户实测可用 | — | ✅ 非缺陷 |
-| 5 | `config/secrets.yaml` 真实 key 曾入库 | P3 | ✅ 已修复（用户已删 key + 已解绑 + 新增模板） |
-| 6 | `cat_1.png`（1.25MB 孤立素材）入库 | P3 | ✅ 已修复（解绑 + `.gitignore`，磁盘保留） |
-| 7 | `tests/integration/` 为空 | — | 待补齐 |
-| 8 | `llm_service.py` 默认模型名与配置口径不一 | P3 | ✅ 已修复（`main.py` 改读 `llm.model`，口径统一到 `settings.yaml`） |
-| 9 | `schedule.*` / `window.*` / `memory.decay_half_life_days` / `memory.summary_interval` 尚未接入统一配置 | P3 | 待第二批接入 |
+| V0018 | `mood_logger` 未被 `registry.register`，`chat_manager` 取不到 → 情绪分析走关键词兜底；`MoodLogger` 的 DB 记录 / 连续负面计数 / 每日缓存均不生效 | P2 | **待确认**（代码静态核实） |
+| V0019 | `ForgettingEngine` 全仓无调用，遗忘曲线未接线（设计是否要求本阶段生效待确认） | P3 | **待确认** |
+| V0005 | 历史提交中的高德 key 仍存在（已失效，风险可接受） | P3 | ✅ 已处置 |
+| V0016 | 若其它客户端用不同 `num_ctx` 连同一 Ollama，仍会互相触发重载 | P3 | 遗留（非本项目单方可解） |
+| V0001~V0017 | 均已修复/撤回（含 V0002 仓库卫生、V0007 降级可恢复、V0009 UI 投递、V0012 搜索库、V0013 流式接口、V0014/V0015 全屏检测、V0017 彩蛋无输出） | — | ✅ 详见台账 |
+
+> `tests/integration/` **已非空**（3 个用例），上一版快照"空"的记录已失效。
 
 ---
 
-## 五、待决策事项（**需用户拍板**）
+## 五、待决策事项（需用户拍板）
 
-1. **点击穿透实现路线**：整窗穿透 + 右键守卫（约 1 小时）／ `WM_NCHITTEST` 逐像素命中（约 1 天，工业标准）。分析见 `dev/方案-点击穿透E11.md`。
-2. **第二批配置接入范围**：`schedule.*` / `window.*` / `memory.decay_half_life_days` / `memory.summary_interval` 是否随下一个模块一并接入。（配置体系本身已定案，见 §六 D-002）
+1. **点击穿透实现路线（E11-os）**：整窗穿透 + 右键守卫（约 1h）／ `WM_NCHITTEST`
+   逐像素命中（约 1 天）。分析见 `dev/方案/方案-点击穿透E11.md`。
+2. **第二批配置接入范围（CFG-2）**：`schedule.*` / `window.*` / `memory.*` 是否随下一个模块一并接入。
+3. **P5 姿态图**是否投入：P1~P3 观感达标则不做。
 
 ---
 
@@ -121,39 +137,46 @@
 | 项 | 结论 |
 |---|---|
 | **形象** | **固定为像素猫**（不做二次元人形，不做 3D） |
-| **动画实现** | **整帧形变 + 程序化特效层 + 交叉淡化**：帧动画层（已有）+ 变换层（呼吸/视线跟随/弹跳）+ 特效层（`QPainter` 绘制 Zzz/爱心/汗滴）+ 交叉淡化平滑 |
-| **作废路线** | ❌ Lottie（需 AE 制作 7 个 JSON，无美术时间，见 `dev/方案-Lottie动画迁移.md`）<br>❌ Live2D + `live2d-py`（需二次元人形模型，且引入 OpenGL 透明窗口风险）<br>❌ 骨骼动画（Alpha 版裁剪明确排除）<br>❌ **SVG 部件分层**（2026-10-08 素材核查：帧为连续噪点色的整帧像素画，无部件语义）<br>❌ **像素级插值补帧**（帧间为不同姿态，会重影） |
-| **覆盖动作** | 呼吸起伏 · 鼠标视线跟随（P2-2）· 弹跳/抖动 · 情绪特效（P2-1）· 抚摸反馈（P2-3） |
-| **决策依据** | 形象约束为猫；无美术时间投入；不引入新依赖；当天可出效果 |
-
-> 完整的路线对比与实施要点见 `dev/方案-动画与气泡系统设计笔记.md`。
+| **动画实现** | 帧动画层 + 变换层（呼吸/视线跟随/弹跳）+ 程序化特效层（`QPainter`）+ 交叉淡化 |
+| **作废路线** | ❌ Lottie ❌ Live2D / OpenGL ❌ 骨骼动画 ❌ SVG 部件分层 ❌ 像素级插值补帧 |
+| **覆盖动作** | 呼吸 · 视线跟随 · 弹跳/抖动 · 情绪特效 · 抚摸反馈 |
 
 ### D-002 · 配置体系接线（2026-10-08 定案）
 
 | 项 | 结论 |
 |---|---|
 | **统一入口** | `core/config.py` 的 `config` 单例 |
-| **优先级** | `app_settings` 表（用户修改） > `config/settings.yaml`（出厂默认） > 调用方传入的兜底值 |
-| **键名规范** | yaml 的点号路径（`llm.timeout`、`health.drink_target_ml`）；历史键名由 `_DB_KEY_ALIASES` 别名表兼容 |
+| **优先级** | `app_settings` > `config/settings.yaml` > 调用方兜底 |
+| **键名规范** | yaml 点号路径；历史键名由 `_DB_KEY_ALIASES` 兼容 |
 | **写入落点** | 仅 `app_settings`（`config.set()` 同步双写规范键与别名） |
-| **随附决策** | `llm.max_tokens` 固化 **512**（待办 O3：回复限 150 字内，提速约 40%）；`llm.timeout` 放宽至 **60**（冷启动首次请求会触发模型加载） |
-| **模型口径** | 统一到 `settings.yaml` 的 `qwen2.5:7b`（`main.py` 不再硬编码）。2026-11-10 由 `qwen2.5:7b-instruct-q4_K_M` 变更：本地环境实际可用的是默认 tag，指定 `q4_K_M` 会令 `/api/chat` 返回 404；代价是量化版本随上游 tag 漂移，若要锁定可改回并先 `ollama pull` |
-| **决策依据** | 用户选择"实现配置加载模块"而非删除配置文件；`settings.yaml` 是设计文档声明的权威默认值来源 |
-| **验收** | 新增 `tests/unit/test_config.py` 24 项；全量 `pytest tests -q` → 66 passed |
+| **模型口径** | `config/settings.yaml` 的 `qwen2.5:7b`。2026-11-10 由 `qwen2.5:7b-instruct-q4_K_M` 变更：本地实际可用的是默认 tag，指定 `q4_K_M` 会令 `/api/chat` 返回 404 |
+| **验收（当时基线）** | 新增 `tests/unit/test_config.py` 24 项；当时全量 66 passed（**当前基线 297 passed**） |
 
-### D-003 · 动画实现方式修正（2026-10-08）
+### D-003 · 动画实现方式修正（2026-10-08 定案 → 2026-11-10 落地）
 
 | 项 | 结论 |
 |---|---|
-| **变更原因** | 素材核查发现现有帧是 AI 生成的**整帧像素画**（每帧 1276~2196 个 4×4 rect、连续噪点色、无部件语义），原定"SVG 部件分层"**不可行** |
-| **实现方式** | 帧动画层（已有）+ 变换层（呼吸/视线跟随/弹跳）+ 程序化特效层（`QPainter`）+ 交叉淡化平滑 |
-| **明确不做** | 像素级插值补帧（帧间为不同姿态，会重影）；部件硬切（位置逐帧漂移，会断裂） |
-| **用户决策** | 2026-10-08 选择「整帧形变 + 程序化特效层 + 插值补帧」方向，并接受"以变换插值 + 交叉淡化替代像素插值"的实现修正 |
+| **变更原因** | 旧素材是 AI 逐帧独立生成的整帧像素画，平移对齐后残余差异 75~98% |
+| **实现方式** | 帧动画层 + 变换层 + 程序化特效层 + 交叉淡化；**2026-11-10 进一步改为单图程序化生成帧序列**（`tools/gen_pet_frames.py` → `pet_png/`） |
+| **明确不做** | 像素级插值补帧；部件硬切 |
+| **回退** | `_load_frames` 优先 `pet_png/`，回退 `pet_svg/`（35 个 `.svg` 帧） |
 
 ---
 
 ## 七、当前阻塞
 
-**无阻塞。** 此前记录的 V0004 已撤回（模型存于移动硬盘 + 对话已实测可用）。
+**无阻塞。** 环境、模型、依赖均已就绪；剩余为功能缺口与待决策项（§五）。
 
-**唯一的技术卡点是动画**（用户 2026-10-08 确认），路线与实现方式均已定案（见 §六 D-001 / D-003）。其余为 2.0 冲刺清单中的可优化点与后续待办，均可自主推进。
+---
+
+## 八、2026-11-10 快照修正记录
+
+上一版快照（2026-10-08）经代码与回归核实，修正如下（保留记录，避免再次失真）：
+
+1. **动画路线**：§一 原写"SVG 部件分层 + 代码程序驱动"，与 §六 D-001/D-003 已否决该路线矛盾 → 更正为"单图程序化生成 + 整帧形变"。
+2. **回归数**：42 / 66 → **297 passed**（`pytest tests -q` 实测）。
+3. **集成测试**：原"`tests/integration/` 为空" → 实际有 3 个用例。
+4. **待办数量**：原"仅 3 项未完成" → 计划文件核为 **9 项**（含 EMO-1 / NOTIFY-1 / G1~G4）。
+5. **情绪事件**：原 EMO-1 结论"`event_bus.py` 现无情绪事件，需新增"**错误** —— `EVENT_MOOD_DETECTED` 自首次提交即存在，且有两个发布方；缺的是订阅者与 UI 通道。
+6. **新增待确认缺陷**：V0018（`mood_logger` 未注册）、V0019（`ForgettingEngine` 未接线）。
+7. **测试解释器**：`.venv-py311/` 已损坏；可用解释器为 `venv/Scripts/python.exe`（Python 3.10.11）。

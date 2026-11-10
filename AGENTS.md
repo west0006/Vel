@@ -28,7 +28,7 @@ Windows 10/11 x64 单人内测的拟人化猫系 AI 桌宠。提供长期记忆�
 | 层级 | 绑定技术 | 现状落地位置 |
 |---|---|---|
 | 桌面框架 | PyQt5 5.15.x | `ui/`、`main.py` |
-| 大语言模型 | Ollama + Qwen2.5:7b-instruct-q4_K_M | `services/llm_service.py` |
+| 大语言模型 | Ollama + Qwen2.5:7b（以 `config/settings.yaml` 的 `llm.model` 为准） | `services/llm_service.py` |
 | 数据库 | SQLite 3（WAL 模式） | `data/pet.db`、`data/db/schema.sql` |
 | 向量记忆 | FAISS + sentence-transformers（384 维） | `services/memory_service.py` |
 | 事件系统 | 自研 EventBus（sync/async/UI 线程安全） | `core/event_bus.py` |
@@ -38,7 +38,7 @@ Windows 10/11 x64 单人内测的拟人化猫系 AI 桌宠。提供长期记忆�
 | OCR | PaddleOCR（GPU）+ Tesseract 备用 | `services/ocr_service.py` |
 | 位置 / 搜索 | 高德 API（免费层）/ Bing → SearXNG → DuckDuckGo 降级链 | `services/location_service.py`、`services/search_service.py` |
 | 打包 | PyInstaller + 启动器式更新 | `build.spec`、`services/update_service.py` |
-| 桌宠形象/动画 | **像素猫** + 整帧形变 + 程序化特效层（**不引入 Live2D/OpenGL；不做 Lottie、骨骼动画、部件分层、像素插值**） | `ui/floating_pet.py`、`ui/resources/animations/pet_svg/` |
+| 桌宠形象/动画 | **像素猫** + 整帧形变 + 程序化特效层（**不引入 Live2D/OpenGL；不做 Lottie、骨骼动画、部件分层、像素插值**） | `ui/floating_pet.py`、`ui/resources/animations/pet_png/`（主）、`pet_svg/`（回退） |
 
 模型名以 `config/settings.yaml` 为准；代码内默认值（如 `llm_service.py` 的 `model` 参数）**只是兜底，不得作为依据**。
 

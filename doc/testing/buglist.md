@@ -23,6 +23,8 @@
 | V0015 | 2026-11-10 | **P1** | ✅ 已修复 | 同一函数误用 `self.winId()`（`VelApplication` 继承 `QApplication`，**无此方法**），且未防 `_floating_pet` 为 `None`、`primaryScreen()` 可能为 `None` → 修完 V0014 后继续每 5 秒报错 | `main.py` |
 | V0016 | 2026-11-10 | **P1** | ✅ 已修复 | LLM 请求未带 `keep_alive`/`num_ctx`：Ollama 默认 5 分钟卸载模型，7B 重载约 **8s**（实测 7.93~8.15s）→ 隔几分钟说一句话就要等加载，表现为"LLM 输出特别慢"；`num_ctx` 取值不一致还会额外触发整模型重载 | `services/llm_service.py`、`config/settings.yaml` |
 | V0017 | 2026-11-10 | **P1** | ✅ 已修复 | 彩蛋命中时 `process_message` 直接 `return`，**从不调用 `_stream_cb`**；而界面只靠流式回调渲染文字 → 输入「喵喵喵」后界面无任何输出（只剩"流结束"信号），表现为"没下文" | `modules/chat/chat_manager.py`、`main.py` |
+| V0018 | 2026-11-10 | P2 | ⚠️ 待确认 | `mood_logger` 未注册：`chat_manager` 取不到实例，情绪分析走关键词兜底；`MoodLogger` 的 DB 记录 / 连续负面计数 / 每日缓存均不生效 | `main.py`、`modules/chat/chat_manager.py` |
+| V0019 | 2026-11-10 | P3 | ⚠️ 待确认 | `ForgettingEngine` 全仓无调用，遗忘曲线未接线 | `modules/personality/forgetting.py` |
 
 ---
 
@@ -69,6 +71,11 @@
 - **处置**：用户已删除高德 key + `git rm --cached config/secrets.yaml` + 新增 `config/secrets.example.yaml` 模板。
 - **⚠️ 残留**：key 文本仍在 git 历史中（含远端历史，若曾推送）；因已失效，风险可接受。
 
+### V0006 · 孤立素材 `cat_1.png` ✅ 已修复（2026-10-08）
+
+- **现象**：`ui/resources/animations/cat_1.png`（1024×1024 RGBA、1.25MB）全仓无引用（`grep -rn "cat_1"` 零命中），却随仓库分发。
+- **处置**：按用户决策采用 **pet.db 同策略** —— `git rm --cached` 解绑 + 加入 `.gitignore`，**磁盘文件保留**（可能是形象素材，将来动画实施可能用得上）。
+
 ### V0007 · LLM 降级不可恢复 ✅ 已修复（2026-10-08，P1）
 
 - **现象**：`services/llm_service.py` 的 `generate()` 开头为
@@ -87,9 +94,6 @@
 - **影响**：违反 AGENTS.md §4.4「严禁裸 `except:` 与静默吞异常，最低限度 `logger.exception()`」；天气获取、设置读写、模型探测等失败**全部无日志**，排障无线索。
 - **修法**：统一改为 `logger.exception("<函数名> 执行失败")`（保留原 except 子句与缩进，消息含函数名便于定位）；`ui/theme.py` 原缺 logger，补齐 `get_logger` 引入。
 - **验证**：`except:pass` 归零 · `compileall` 通过 · **57 个生产模块逐个 import 冒烟 0 失败** · 全量回归 154 passed。
-
-- **现象**：`ui/resources/animations/cat_1.png`（1024×1024 RGBA、1.25MB）全仓无引用（`grep -rn "cat_1"` 零命中），却随仓库分发。
-- **处置**：按用户决策采用 **pet.db 同策略** —— `git rm --cached` 解绑 + 加入 `.gitignore`，**磁盘文件保留**（可能是形象素材，将来动画实施可能用得上）。
 
 ### V0009 · UI 事件投递可能永久失效 ✅ 已修复（2026-10-08，P1）
 
@@ -242,6 +246,31 @@
      且一个 chunk 都没推过，则补推整段** —— 防止将来再有路径绕过流式回调。
 - **测试**：`test_easter_egg_pushes_stream_callback`（断言回调恰好收到彩蛋全文）、
   `test_easter_egg_without_callback_is_safe`（无界面场景不崩）。
-- **遗留**：彩蛋配置里的 `emotion` 字段（`happy`/`alert`/`sleep`/`wake`）**仍未被使用** ——
-  彩蛋触发时桌宠不会切换到对应情绪。需新增情绪事件（`core/event_bus.py` 目前无情绪事件），
-  属独立改动，未纳入本次范围。
+- **遗留（已归入 EMO-1）**：彩蛋配置里的 `emotion` 字段（`happy`/`alert`/`sleep`/`wake`）**仍未被使用** ——
+  彩蛋触发时桌宠不会切换到对应情绪。
+
+  > **2026-11-10 更正**：原文"需新增情绪事件（`core/event_bus.py` 目前无情绪事件）"**不成立** ——
+  > `EVENT_MOOD_DETECTED = "mood_detected"` 自首次提交即存在（`core/event_bus.py:24`），
+  > 且有两个发布方（`chat_manager._analyze_mood`、`mood_logger.analyze`）。缺的是订阅者与
+  > "情绪 → `set_emotion()`"的通道，应**复用**该事件，不要新增重复事件。
+
+### V0018 · `mood_logger` 未注册，情绪分析走关键词兜底 ⚠️ 待确认（2026-11-10，P2）
+
+- **发现途径**：整理 `CURRENT-STATUS.md` 时核实 `chat_manager._mood_logger` 的来源。
+- **缺陷**：`modules/chat/chat_manager.py` 通过 `registry.get("mood_logger")` 取实例，
+  但全仓**没有** `registry.register("mood_logger", ...)`；`modules/health/mood_logger.py`
+  末尾的模块级 `mood_logger = MoodLogger()` 也无人 import。
+- **影响**：`chat_manager` 永远走 `_fallback_mood_analyze()` 关键词兜底；
+  `MoodLogger.analyze()` 的 DB 记录、连续负面计数、每日缓存均不生效。
+  对话功能本身不受影响（有兜底），故定 P2。
+- **状态**：待确认 —— 需判断是"接线遗漏"还是"本阶段只保留接口"。
+- **建议**：在 `main.py` 与其余 health 模块同批注册；或明确文档化的降级路线；
+  补一个注册表集成断言（防再次静默失效）。
+
+### V0019 · `ForgettingEngine` 未接线 ⚠️ 待确认（2026-11-10，P3）
+
+- **发现途径**：同上，核对 `personality` 能力清单。
+- **缺陷**：`modules/personality/forgetting.py` 定义了 `ForgettingEngine`（衰减、清理、周维护），
+  但全仓无 import / 实例化 / 调度调用。
+- **影响**：遗忘曲线不生效；上一版 `CURRENT-STATUS` 称 personality 已含"遗忘曲线"，属过度陈述。
+- **状态**：待确认 —— 设计是否要求本阶段生效（若否，应在文档中明确标为未实施）。
