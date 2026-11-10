@@ -202,3 +202,65 @@ class TestGenerateStreamSignature:
         captured = self._stub(svc, monkeypatch)
         list(svc.generate_stream("hi"))
         assert captured["memories"] is None
+
+
+class TestOllamaPayload:
+    """发往 Ollama 的请求参数：模型驻留与上下文窗口。
+
+    背景（实测）：生成速度本身正常（约 40 tok/s），真正的时间黑洞是
+    **模型加载**——Ollama 默认 5 分钟即卸载，7B 重载约 8 秒；用户隔几分钟
+    说一句话，每次都要等加载，表现为"LLM 输出特别慢"。
+    另外 `num_ctx` 被 Ollama 视为模型实例配置，**取值不一致会触发整模型重载**
+    （实测 7.9~8.2s）。故两者都必须显式、固定地随每个请求发送。
+    """
+
+    @staticmethod
+    def _capture(monkeypatch):
+        """拦截 requests.post，返回捕获到的 JSON payload。"""
+        captured = {}
+
+        class _FakeResponse:
+            status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"message": {"content": "ok"}}
+
+            def iter_lines(self, decode_unicode=True):
+                return iter(['{"message": {"content": "ok"}}'])
+
+        def _fake_post(url, json=None, **kwargs):
+            captured["payload"] = json
+            return _FakeResponse()
+
+        monkeypatch.setattr("services.llm_service.requests.post", _fake_post)
+        return captured
+
+    def test_call_ollama_sends_keep_alive_and_num_ctx(self, monkeypatch):
+        svc = LLMService(keep_alive="30m", num_ctx=4096)
+        captured = self._capture(monkeypatch)
+
+        svc._call_ollama([{"role": "user", "content": "hi"}])
+
+        payload = captured["payload"]
+        assert payload["keep_alive"] == "30m"
+        assert payload["options"]["num_ctx"] == 4096
+
+    def test_generate_stream_sends_keep_alive_and_num_ctx(self, monkeypatch):
+        """流式是主路径，同样必须带上这两个参数。"""
+        svc = LLMService(keep_alive="1h", num_ctx=2048)
+        captured = self._capture(monkeypatch)
+
+        list(svc.generate_stream("hi"))
+
+        payload = captured["payload"]
+        assert payload["keep_alive"] == "1h"
+        assert payload["options"]["num_ctx"] == 2048
+
+    def test_defaults_prevent_unload_and_fit_history(self):
+        """默认值须能防住 5 分钟卸载，且上下文容得下 10 轮历史 + 生成。"""
+        svc = LLMService()
+        assert svc.keep_alive and str(svc.keep_alive) not in ("0", "0s")
+        assert svc.num_ctx >= 2048, "过小的 num_ctx 会截断 10 轮历史"

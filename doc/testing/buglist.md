@@ -21,6 +21,7 @@
 | V0013 | 2026-11-10 | **P1** | ✅ 已修复 | `generate_stream()` 缺 `memories` 参数，而 `chat_manager._stream_generate` 以 `memories=memories` 调用 → **流式对话每次都抛 TypeError 并被静默降级**为非流式 | `services/llm_service.py` |
 | V0014 | 2026-11-10 | **P1** | ✅ 已修复 | `_check_idle_and_fullscreen` 使用 `ctypes.wintypes.RECT()` 但只 `import ctypes`（子模块需显式导入）→ **每 5 秒抛 AttributeError**，全屏/闲置检测完全失效且日志被同一异常刷屏 | `main.py` |
 | V0015 | 2026-11-10 | **P1** | ✅ 已修复 | 同一函数误用 `self.winId()`（`VelApplication` 继承 `QApplication`，**无此方法**），且未防 `_floating_pet` 为 `None`、`primaryScreen()` 可能为 `None` → 修完 V0014 后继续每 5 秒报错 | `main.py` |
+| V0016 | 2026-11-10 | **P1** | ✅ 已修复 | LLM 请求未带 `keep_alive`/`num_ctx`：Ollama 默认 5 分钟卸载模型，7B 重载约 **8s**（实测 7.93~8.15s）→ 隔几分钟说一句话就要等加载，表现为"LLM 输出特别慢"；`num_ctx` 取值不一致还会额外触发整模型重载 | `services/llm_service.py`、`config/settings.yaml` |
 
 ---
 
@@ -188,3 +189,34 @@
 - **测试**：`TestFullscreenDetection` 7 项 —— 6 项覆盖纯函数（自身窗口不算全屏、
   无前台窗口、屏幕尺寸为 0、恰好 95% 达标、差 4px 不达标、只有宽度达标），
   1 项守卫方法体（断言不含 `self.winId()`、含 `self._floating_pet.winId()` 与判空）。
+
+### V0016 · 「LLM 输出特别慢」实为模型反复重载 ✅ 已修复（2026-11-10，P1）
+
+- **现象**：用户反馈"llm 输出特别慢"，主观感觉像推理慢。
+- **诊断方法（先量化，不靠猜）**：直接对 Ollama `/api/chat` 计时，把一次请求拆成
+  prompt 处理 / 生成 / 模型加载三段：
+
+  | 场景 | prompt | prompt 处理 | 生成 | **模型加载** | 总耗时 |
+  |---|---|---|---|---|---|
+  | 1 轮（已热身） | 87 tok | 0.02s | 0.14s | 0.17s | **0.35s** |
+  | 5 轮 | 327 tok | 0.12s | 0.05s | 0.20s | 0.38s |
+  | 10 轮（当前上限） | 629 tok | 0.17s | 0.18s | 0.22s | **0.59s** |
+  | 首次 / 配置变化 | — | 0.06s | — | **7.93s** | 8.16s |
+
+- **结论（与直觉相反）**：
+  1. **生成速度正常**（约 40 tok/s）；**prompt 也不长** —— 10 轮历史仅 629 token，处理 0.17s；
+  2. **真正的时间黑洞是"模型加载"**，约 8 秒；
+  3. Ollama 默认 `keep_alive` 为 **5 分钟**，超时即卸载模型 → 隔几分钟说一句话，
+     每次都要重新加载，主观上就是"特别慢"；
+  4. 附加坑：`num_ctx` 被 Ollama 当作**模型实例配置**，取值不一致会触发整模型重载
+     （实测：4096 → 8192 切换时 `load_duration` 8.15s）。
+- **修法**：
+  - `_call_ollama` 与 `generate_stream` 两个 payload 都显式发送
+    `keep_alive`（默认 `"30m"`）与 `options.num_ctx`（默认 `4096`）；
+  - 二者接入 `core/config.py`（`llm.keep_alive` / `llm.num_ctx`），可在 `settings.yaml` 调整；
+  - `num_ctx=4096` 对"10 轮历史 + 512 生成"有约 3 倍余量，KV cache 只占 8192 的一半。
+- **测试**：`TestOllamaPayload` 3 项 —— 非流式与流式 payload 都必须带 `keep_alive` 与
+  `options.num_ctx`（这类改动改错了不会有任何报错，只会继续慢）；默认值须能防住
+  5 分钟卸载且 `num_ctx >= 2048`。
+- **遗留**：若同时用其它客户端（如 Open WebUI）连同一个 Ollama 且 `num_ctx` 不同，
+  仍会互相触发重载 —— 属跨客户端配置一致性问题，非本项目单方能解决。

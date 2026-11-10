@@ -363,6 +363,9 @@ class VelApplication:
                 temperature=config.get_float("llm.temperature", 0.7),
                 context_window=config.get_int("llm.context_window", 10),
                 fallback_replies=config.section("llm").get("fallback_replies"),
+                # 模型驻留时长（防 5 分钟卸载后重载 8s）与固定上下文窗口
+                keep_alive=config.get_str("llm.keep_alive", "30m"),
+                num_ctx=config.get_int("llm.num_ctx", 4096),
             )
             registry.register("llm_service", self._llm_service)
             ok, msg = self._llm_service.check_connection()

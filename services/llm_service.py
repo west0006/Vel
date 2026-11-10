@@ -34,6 +34,8 @@ class LLMService:
         temperature: float = 0.7,
         context_window: int = 10,
         fallback_replies: Optional[List[str]] = None,
+        keep_alive: str = "30m",
+        num_ctx: int = 4096,
     ):
         self.model = model
         self.base_url = f"http://{host}:{port}"
@@ -41,6 +43,13 @@ class LLMService:
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.context_window = context_window
+        # 模型驻留时长。Ollama 默认 5 分钟即卸载，而重载 7B 模型需约 8 秒 ——
+        # 用户隔几分钟说一句话时，每次都要等加载，表现为"LLM 特别慢"。
+        self.keep_alive = keep_alive
+        # 上下文窗口。**必须固定**：Ollama 把 num_ctx 视为模型实例配置，
+        # 不同值会触发整模型重载（实测 7.9~8.2s）。4096 对"10 轮历史 + 512 生成"
+        # 有约 3 倍余量，且 KV cache 只占 8192 的一半。
+        self.num_ctx = num_ctx
         self._user_name = "用户"
 
         self._fallback_replies = fallback_replies or [
@@ -190,7 +199,9 @@ class LLMService:
             "options": {
                 "temperature": self.temperature,
                 "num_predict": self.max_tokens,
+                "num_ctx": self.num_ctx,
             },
+            "keep_alive": self.keep_alive,
             "stream": False,
         }
 
@@ -285,7 +296,9 @@ class LLMService:
             "options": {
                 "temperature": self.temperature,
                 "num_predict": self.max_tokens,
+                "num_ctx": self.num_ctx,
             },
+            "keep_alive": self.keep_alive,
             "stream": True,
         }
 
