@@ -99,27 +99,27 @@ EMOTION_EFFECTS: Dict[str, EmitterConfig] = {
         origin=(0.72, 0.20),
     ),
     "happy": EmitterConfig(
-        kind="heart", color=(255, 110, 140), interval=0.45,
+        kind="heart", color=(255, 110, 140), interval=0.22,
         life=(1.2, 1.9), speed=(-34.0, -20.0), size=(8.0, 14.0),
         origin=(0.70, 0.30),
     ),
     "sad": EmitterConfig(
-        kind="drop", color=(120, 170, 230), interval=0.8,
+        kind="drop", color=(120, 170, 230), interval=0.40,
         life=(1.0, 1.6), speed=(6.0, 16.0), size=(6.0, 10.0),
         origin=(0.62, 0.42),
     ),
     "alert": EmitterConfig(
-        kind="bang", color=(255, 170, 60), interval=0.55,
+        kind="bang", color=(255, 170, 60), interval=0.28,
         life=(0.6, 1.0), speed=(-16.0, -8.0), size=(10.0, 14.0),
         origin=(0.74, 0.24),
     ),
     "thinking": EmitterConfig(
-        kind="question", color=(150, 160, 200), interval=1.1,
+        kind="question", color=(150, 160, 200), interval=0.45,
         life=(1.6, 2.4), speed=(-15.0, -8.0), size=(10.0, 15.0),
         origin=(0.70, 0.28),
     ),
     "wake": EmitterConfig(
-        kind="star", color=(255, 215, 110), interval=0.7,
+        kind="star", color=(255, 215, 110), interval=0.28,
         life=(0.9, 1.5), speed=(-28.0, -16.0), size=(7.0, 12.0),
         origin=(0.68, 0.32),
     ),
@@ -165,12 +165,19 @@ class PetEffects:
             self._particles.clear()
 
     def set_emotion(self, emotion: str) -> None:
-        """切换情绪：清空当前粒子，切换到新发射器。"""
+        """切换情绪：切换发射器，**保留已有粒子让其自然淡出**。
+
+        原实现会立即 ``clear()``，导致动作结束（如 happy 710ms）时刚生成的粒子
+        瞬间消失 —— 视觉上"爱心还没飘起来就没了"。保留粒子则动作结束后特效仍有
+        余韵，这正是桌宠该有的味道。
+
+        数量由 ``MAX_PARTICLES`` 上限约束，不会无限堆积；且 ``advance()`` 的粒子
+        更新先于"查当前情绪是否配置特效"，因此切到无特效情绪（如 idle）后，
+        旧粒子仍会正常飘完再回收。
+        """
         if emotion == self._emotion:
             return
         self._emotion = emotion
-        # 情绪切换时清空，避免上一个情绪的特效残留造成语义混乱
-        self._particles.clear()
         self._since_emit = 0.0
 
     def clear(self) -> None:

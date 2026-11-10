@@ -92,13 +92,50 @@ class TestPetEffects:
             fx.advance(500.0, 256)
         assert fx.particle_count <= MAX_PARTICLES
 
-    def test_set_emotion_clears(self):
+    def test_set_emotion_keeps_particles(self):
+        """切换情绪**不清空**已有粒子，让其自然淡出。
+
+        原实现会立即 clear()，导致 happy（710ms）动作结束时刚生成的爱心瞬间消失
+        —— 视觉上"还没飘起来就没了"。现在保留粒子，动作结束后特效仍有余韵
+        （数量仍受 MAX_PARTICLES 约束）。
+        """
         fx = PetEffects("happy")
         fx.advance(1000.0, 256)
-        assert fx.particle_count >= 1
+        before = fx.particle_count
+        assert before >= 1
         fx.set_emotion("sad")
-        assert fx.particle_count == 0
+        assert fx.particle_count == before
         assert fx.emotion == "sad"
+
+    def test_old_particles_fade_after_switching_to_plain_emotion(self):
+        """切到无特效情绪的 idle 后，旧粒子仍会继续推进并最终被回收。"""
+        fx = PetEffects("happy")
+        fx.advance(500.0, 256)
+        assert fx.particle_count >= 1
+
+        fx.set_emotion("idle")          # idle 未配置特效 → 只停发射，不新增
+        for _ in range(20):             # 累计 4s，超过 happy 的 life 上限 1.9s
+            fx.advance(200.0, 256)
+        assert fx.particle_count == 0
+
+    def test_emission_interval_fits_action_duration(self):
+        """守护：发射间隔不能大于动作窗口，否则一个粒子都发不出来。
+
+        单次动作（loop=False）只播一遍；循环情绪至少播两遍，故窗口按 2 个循环算。
+        """
+        from ui.floating_pet import FloatingPet
+        from ui.pet_fx import EMOTION_EFFECTS
+
+        single_shot = {"happy", "wake"}
+        for emotion, config in EMOTION_EFFECTS.items():
+            durations = FloatingPet.EMOTION_FRAME_MS.get(emotion)
+            if not durations:
+                continue
+            cycle_seconds = sum(durations) / 1000.0
+            window = cycle_seconds if emotion in single_shot else cycle_seconds * 2
+            assert config.interval <= window, (
+                f"{emotion}: 发射间隔 {config.interval}s 超出可用窗口 {window:.2f}s"
+            )
 
     def test_set_same_emotion_keeps_particles(self):
         fx = PetEffects("happy")
