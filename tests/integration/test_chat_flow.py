@@ -141,6 +141,40 @@ class TestEasterEggPriority:
         manager.initialize()
         assert manager.process_message("普通消息") == "正常回复"
 
+    def test_easter_egg_pushes_stream_callback(self, manager, clean_registry):
+        """彩蛋命中时**必须**经 ``_stream_cb`` 推送文字（V0017 回归）。
+
+        背景：界面（`main.VelApplication`）**只**通过流式回调渲染回复，
+        而彩蛋分支原本直接 ``return egg["reply"]``，从不调用回调 →
+        用户输入「喵喵喵」后界面完全没有输出，只剩一个"流结束"信号。
+        这条测试盯住"命中彩蛋后界面有东西可显示"。
+        """
+        class _Egg:
+            def match(self, text):
+                return {"reply": "🥚 喵～你终于说猫话了"} if "喵" in text else None
+
+        clean_registry.register("easter_egg_engine", _Egg())
+        manager.initialize()
+
+        received: list = []
+        manager.set_stream_callback(received.append)
+        reply = manager.process_message("喵喵喵")
+
+        assert reply == "🥚 喵～你终于说猫话了"
+        assert received == ["🥚 喵～你终于说猫话了"], (
+            "彩蛋回复必须推送到流式回调，否则界面无任何输出"
+        )
+
+    def test_easter_egg_without_callback_is_safe(self, manager, clean_registry):
+        """未注册流式回调时（如单元测/无界面场景）不得抛异常。"""
+        class _Egg:
+            def match(self, text):
+                return {"reply": "彩蛋"} if "蛋" in text else None
+
+        clean_registry.register("easter_egg_engine", _Egg())
+        manager.initialize()
+        assert manager.process_message("彩蛋") == "彩蛋"
+
 
 class TestResilience:
     """依赖缺失/异常时不得崩溃。"""

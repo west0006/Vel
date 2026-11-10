@@ -584,7 +584,10 @@ class VelApplication:
         import threading
 
         # 流式回调：后台线程通过信号逐 chunk 推送到主线程 UI
+        streamed_chunks: list = []
+
         def _on_stream(chunk: str) -> None:
+            streamed_chunks.append(chunk)
             self._reply_bridge.ready.emit(text, chunk)
 
         self._chat_manager.set_stream_callback(_on_stream)
@@ -592,6 +595,11 @@ class VelApplication:
         def _worker():
             try:
                 reply = self._chat_manager.process_message(text)
+                # 兜底：彩蛋等路径不经过流式回调（直接 return 整段回复）。
+                # 若一个 chunk 都没推过就发 __END__，界面会一直空着 —— 表现为
+                # "输入后没下文"。这里补推一次。
+                if reply and not streamed_chunks:
+                    self._reply_bridge.ready.emit(text, reply)
                 # 标记流结束 → 主线程固化
                 self._reply_bridge.ready.emit(text, "\0__END__")
             except Exception as e:

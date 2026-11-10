@@ -22,6 +22,7 @@
 | V0014 | 2026-11-10 | **P1** | ✅ 已修复 | `_check_idle_and_fullscreen` 使用 `ctypes.wintypes.RECT()` 但只 `import ctypes`（子模块需显式导入）→ **每 5 秒抛 AttributeError**，全屏/闲置检测完全失效且日志被同一异常刷屏 | `main.py` |
 | V0015 | 2026-11-10 | **P1** | ✅ 已修复 | 同一函数误用 `self.winId()`（`VelApplication` 继承 `QApplication`，**无此方法**），且未防 `_floating_pet` 为 `None`、`primaryScreen()` 可能为 `None` → 修完 V0014 后继续每 5 秒报错 | `main.py` |
 | V0016 | 2026-11-10 | **P1** | ✅ 已修复 | LLM 请求未带 `keep_alive`/`num_ctx`：Ollama 默认 5 分钟卸载模型，7B 重载约 **8s**（实测 7.93~8.15s）→ 隔几分钟说一句话就要等加载，表现为"LLM 输出特别慢"；`num_ctx` 取值不一致还会额外触发整模型重载 | `services/llm_service.py`、`config/settings.yaml` |
+| V0017 | 2026-11-10 | **P1** | ✅ 已修复 | 彩蛋命中时 `process_message` 直接 `return`，**从不调用 `_stream_cb`**；而界面只靠流式回调渲染文字 → 输入「喵喵喵」后界面无任何输出（只剩"流结束"信号），表现为"没下文" | `modules/chat/chat_manager.py`、`main.py` |
 
 ---
 
@@ -220,3 +221,27 @@
   5 分钟卸载且 `num_ctx >= 2048`。
 - **遗留**：若同时用其它客户端（如 Open WebUI）连同一个 Ollama 且 `num_ctx` 不同，
   仍会互相触发重载 —— 属跨客户端配置一致性问题，非本项目单方能解决。
+
+### V0017 · 彩蛋触发后界面无任何输出 ✅ 已修复（2026-11-10，P1）
+
+- **现象**：用户输入「喵喵喵」（配置里的 `exact` 彩蛋），界面**没有任何回复**，表现为"没下文"。
+- **根因（链路对不上，而非彩蛋本身有问题）**：
+  - 界面渲染：`main.VelApplication._on_reply_ready` 只处理 `_on_stream` 推送的 chunk
+    （`stream_append`），**回复文字完全依赖流式回调**；
+  - 彩蛋路径：`chat_manager.process_message` 命中后直接 `return egg["reply"]`，
+    **从不调用 `self._stream_cb`**；
+  - `main.py._worker` 拿到 `reply` 后**从未使用**，只 emit 了 `\0__END__`；
+  - 结果：零个 chunk → 界面空白 → 立刻收到"流结束" → `stream_finish()`。
+  彩蛋配置里的 `reply` 本身完全正确，只是从未被送到界面。
+- **为何长期未发现**：`tests/integration/test_chat_flow.py` 的彩蛋测试只断言
+  **返回值**（`process_message(...) == "🥚 彩蛋回复"`），从未断言"文字有没有推给界面"。
+  返回值对、界面却空，测试依然全绿 —— 又一个"测了但没测到关键链路"的例子。
+- **修法（两处：治根因 + 兜底）**：
+  1. 彩蛋分支主动推送：`if self._stream_cb: self._stream_cb(egg["reply"])`；
+  2. `main.py._worker` 兜底：用 `streamed_chunks` 记录是否推过内容，**若 `reply` 非空
+     且一个 chunk 都没推过，则补推整段** —— 防止将来再有路径绕过流式回调。
+- **测试**：`test_easter_egg_pushes_stream_callback`（断言回调恰好收到彩蛋全文）、
+  `test_easter_egg_without_callback_is_safe`（无界面场景不崩）。
+- **遗留**：彩蛋配置里的 `emotion` 字段（`happy`/`alert`/`sleep`/`wake`）**仍未被使用** ——
+  彩蛋触发时桌宠不会切换到对应情绪。需新增情绪事件（`core/event_bus.py` 目前无情绪事件），
+  属独立改动，未纳入本次范围。

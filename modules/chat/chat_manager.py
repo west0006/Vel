@@ -63,6 +63,10 @@ class ChatManager:
             if egg:
                 self._save_to_archive("user", user_input)
                 self._save_to_archive("assistant", egg["reply"])
+                # 彩蛋不经过 LLM 流式路径，但界面**只**通过 _stream_cb 渲染文字 ——
+                # 不主动推一次的话，用户输入后界面会完全没有输出（"输入后没下文"）。
+                if self._stream_cb:
+                    self._stream_cb(egg["reply"])
                 return egg["reply"]
 
         # 2. 存档用户消息
