@@ -126,10 +126,26 @@ class TestLoadFrames:
                 assert frame.height() <= FRAME_RENDER_SIZE
 
     def test_frames_are_cropped_tight(self, qt_app):
-        """帧应已按包围盒紧密裁切（边缘不再残留大片透明）。"""
-        for frame in _load_frames("idle"):
-            box = _alpha_bbox(frame)
-            assert box is not None
-            # 缩放会产生少量半透明边缘像素，留 10% 容差
-            assert box.width() >= frame.width() * 0.9
-            assert box.height() >= frame.height() * 0.9
+        """PNG 帧是整画布（不裁切），SVG 回退帧才裁切紧密。
+
+        历史：本测试原用于断言"SVG 帧已按包围盒裁切"。引入 pet_png 后，
+        优先返回的是**整画布**帧（512×512，主体位置内置对齐），因此改为
+        按帧来源分别断言。
+        """
+        from ui.floating_pet import PNG_FRAME_DIR
+
+        frames = _load_frames("idle")
+        assert frames
+        if os.path.isdir(os.path.join(PNG_FRAME_DIR, "idle")):
+            # PNG 整画布帧：尺寸固定，包围盒应明显小于画布（四周透明）
+            for frame in frames:
+                assert frame.width() == FRAME_RENDER_SIZE
+                box = _alpha_bbox(frame)
+                assert box is not None
+                assert box.width() < frame.width() * 0.95
+        else:
+            for frame in frames:
+                box = _alpha_bbox(frame)
+                assert box is not None
+                assert box.width() >= frame.width() * 0.9
+                assert box.height() >= frame.height() * 0.9

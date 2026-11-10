@@ -18,6 +18,8 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 FRAME_DIR = os.path.join(os.path.dirname(__file__), "resources", "animations", "pet_svg")
+#: 由 tools/gen_pet_frames.py 从单张静态图程序化生成（帧间一致），优先使用
+PNG_FRAME_DIR = os.path.join(os.path.dirname(__file__), "resources", "animations", "pet_png")
 
 #: 帧归一化参数
 FRAME_RENDER_SIZE = 512            # 预渲染尺寸（2x，保证缩放质量）
@@ -62,17 +64,55 @@ def _alpha_bbox(pix: QPixmap, threshold: int = ALPHA_THRESHOLD) -> "Optional[QRe
         return None
 
 
-def _load_frames(state: str) -> list:
-    """加载某状态的全部 SVG 帧，**裁切包围盒并归一化到统一高度**。
+def _load_png_frames(folder: str) -> list:
+    """加载 PNG 帧序列。
 
-    归一化针对诊断出的两个最刺眼的跳变（依据见 `doc/dev/计划-当前待办.md` §3.0）：
+    这些帧由 `tools/gen_pet_frames.py` 从**单张静态图**程序化生成，
+    已是统一的整画布（512×512）且主体位置内置对齐，因此**不做**裁切与归一化。
 
-    - **尺寸跳变**：各帧主题宽高差异最高近 2 倍（如 sleep 123~231px）→ 等比统一缩放；
-    - **位置跳变**：各帧主题位置漂移（底边跳动最多 36px）→ 由绘制方按底部对齐。
+    Args:
+        folder: 某情绪的 PNG 帧目录。
 
     Returns:
-        ``QPixmap`` 列表，每帧已裁切 + 等比缩放；目录缺失时返回空列表。
+        ``QPixmap`` 列表（按文件名排序）；目录不可读时返回空列表。
     """
+    try:
+        files = sorted(f for f in os.listdir(folder) if f.lower().endswith(".png"))
+    except OSError as exc:
+        logger.warning(f"读取 PNG 帧目录失败: {folder} -> {exc}")
+        return []
+
+    frames = []
+    for fname in files:
+        path = os.path.join(folder, fname)
+        pix = QPixmap(path)
+        if pix.isNull():
+            logger.warning(f"PNG 帧加载失败: {path}")
+            continue
+        frames.append(pix)
+    if frames:
+        logger.info(f"加载 [{os.path.basename(folder)}] {len(frames)} 帧（PNG，程序化生成）")
+    return frames
+
+
+def _load_frames(state: str) -> list:
+    """加载某状态的帧序列。
+
+    **优先** `pet_png/`：由 `tools/gen_pet_frames.py` 从单张静态图程序化生成，
+    帧间内容完全一致（诊断显示旧素材帧间差异达 75~98%，是"动画效果差"的根因）。
+    **回退** `pet_svg/`：旧素材（AI 逐帧生成），需要裁切包围盒并归一化。
+
+    Returns:
+        ``QPixmap`` 列表；两种素材都不存在时返回空列表。
+    """
+    # 1) 优先：程序化生成的 PNG 帧（整画布，已内置对齐）
+    png_folder = os.path.join(PNG_FRAME_DIR, state)
+    if os.path.isdir(png_folder):
+        png_frames = _load_png_frames(png_folder)
+        if png_frames:
+            return png_frames
+
+    # 2) 回退：旧 SVG 帧（裁切 + 归一化）
     folder = os.path.join(FRAME_DIR, state)
     if not os.path.isdir(folder):
         return []
@@ -217,27 +257,36 @@ def _load_micro_config():
 def compute_frame_rect(pix_width: int, pix_height: int, display_size: int,
                        track_offset: tuple = (0, 0),
                        bottom_ratio: float = FRAME_BOTTOM_RATIO) -> QRect:
-    """计算归一化帧在窗口内的绘制矩形（模块级纯函数，便于单元测试）。
+    """计算帧在窗口内的绘制矩形（模块级纯函数，便于单元测试）。
 
-    归一化后的帧已按包围盒裁切，故只需：水平居中 + **底部对齐** + 视线跟随偏移。
-    底部对齐用于消除各帧底边漂移（诊断：原始帧底边跳动最多 36px）。
+    支持两种帧形态：
+
+    * **整画布帧**（`pet_png/`，由单图程序化生成，512×512 且主体位置已内置对齐）
+      → 直接铺满窗口。垂直/旋转偏移已编码在画布内的相对位置上，若再底部对齐
+      会造成"双重对齐"、动作幅度丢失；
+    * **裁切帧**（旧 `pet_svg/`）→ 水平居中 + **底部对齐** + 视线跟随偏移。
 
     Args:
-        pix_width: 归一化帧宽度（预渲染坐标系）。
-        pix_height: 归一化帧高度（预渲染坐标系）。
+        pix_width: 帧宽度（预渲染坐标系）。
+        pix_height: 帧高度（预渲染坐标系）。
         display_size: 窗口边长（逻辑像素）。
         track_offset: 视线跟随偏移 ``(tx, ty)``。
-        bottom_ratio: 主题底部在窗口中的相对位置。
+        bottom_ratio: 裁切帧的底部相对位置。
 
     Returns:
         绘制矩形（窗口局部坐标）。
     """
     scale = display_size / float(FRAME_RENDER_SIZE)
+    tx, ty = int(track_offset[0]), int(track_offset[1])
+
+    # 整画布帧：铺满窗口（保持画布内已对齐的相对位置）
+    if pix_width == FRAME_RENDER_SIZE and pix_height == FRAME_RENDER_SIZE:
+        return QRect(tx, ty, display_size, display_size)
+
     width = max(1, int(round(pix_width * scale)))
     height = max(1, int(round(pix_height * scale)))
-    tx, ty = track_offset
-    x = (display_size - width) // 2 + int(tx)
-    y = int(display_size * bottom_ratio) - height + int(ty)
+    x = (display_size - width) // 2 + tx
+    y = int(display_size * bottom_ratio) - height + ty
     return QRect(x, y, width, height)
 
 
