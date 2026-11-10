@@ -137,7 +137,7 @@
 | **键名规范** | yaml 的点号路径（`llm.timeout`、`health.drink_target_ml`）；历史键名由 `_DB_KEY_ALIASES` 别名表兼容 |
 | **写入落点** | 仅 `app_settings`（`config.set()` 同步双写规范键与别名） |
 | **随附决策** | `llm.max_tokens` 固化 **512**（待办 O3：回复限 150 字内，提速约 40%）；`llm.timeout` 放宽至 **60**（冷启动首次请求会触发模型加载） |
-| **模型口径** | 统一到 `settings.yaml` 的 `qwen2.5:7b-instruct-q4_K_M`（`main.py` 不再硬编码） |
+| **模型口径** | 统一到 `settings.yaml` 的 `qwen2.5:7b`（`main.py` 不再硬编码）。2026-11-10 由 `qwen2.5:7b-instruct-q4_K_M` 变更：本地环境实际可用的是默认 tag，指定 `q4_K_M` 会令 `/api/chat` 返回 404；代价是量化版本随上游 tag 漂移，若要锁定可改回并先 `ollama pull` |
 | **决策依据** | 用户选择"实现配置加载模块"而非删除配置文件；`settings.yaml` 是设计文档声明的权威默认值来源 |
 | **验收** | 新增 `tests/unit/test_config.py` 24 项；全量 `pytest tests -q` → 66 passed |
 

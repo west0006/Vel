@@ -26,7 +26,7 @@ pip install -r requirements.txt
 cp config/secrets.example.yaml config/secrets.yaml
 
 # 3. 准备本地模型（模型名见 config/settings.yaml 的 llm.model）
-ollama pull qwen2.5:7b-instruct-q4_K_M
+ollama pull qwen2.5:7b
 
 # 4. 启动
 python main.py

@@ -355,7 +355,7 @@ class VelApplication:
             from services.llm_service import LLMService
             # 参数全部来自 config（app_settings 覆盖 config/settings.yaml）
             self._llm_service = LLMService(
-                model=config.get_str("llm.model", "qwen2.5:7b-instruct-q4_K_M"),
+                model=config.get_str("llm.model", "qwen2.5:7b"),
                 host=config.get_str("llm.host", "127.0.0.1"),
                 port=config.get_int("llm.port", 11434),
                 timeout=config.get_int("llm.timeout", 60),

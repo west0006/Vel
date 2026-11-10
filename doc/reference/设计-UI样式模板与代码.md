@@ -418,7 +418,7 @@ class ChatBubble(QWidget):
 
     message_sent = pyqtSignal(str)
 
-    def __init__(self, pet, model: str = "qwen2.5:7b-instruct-q4_K_M"):
+    def __init__(self, pet, model: str = "qwen2.5:7b"):
         super().__init__()
         self.pet = pet
         self.model = model
