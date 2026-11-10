@@ -163,3 +163,42 @@ class TestConfiguration:
         messages = svc._build_messages()
         assert messages[0]["role"] == "system"
         assert "测试角色" in messages[0]["content"]
+
+
+class TestGenerateStreamSignature:
+    """V0013 回归：``generate_stream`` 必须与 ``generate`` **同构**。
+
+    缺陷：本方法原签名是 ``generate_stream(self, user_input)``，而
+    ``chat_manager._stream_generate`` 以 ``memories=memories`` 调用 →
+    流式对话每次都抛 ``TypeError`` 并被静默降级为非流式，
+    表现为"流式生成异常: unexpected keyword argument 'memories'"。
+    """
+
+    @staticmethod
+    def _stub(svc, monkeypatch):
+        """挂掉真实网络调用，并捕获 _build_messages 收到的 memories。"""
+        captured = {}
+        monkeypatch.setattr(svc, "add_to_history", lambda *a, **k: None)
+        monkeypatch.setattr(
+            svc, "_build_messages",
+            lambda memories=None: captured.setdefault("memories", memories) or [],
+        )
+        monkeypatch.setattr(
+            "services.llm_service.requests.post",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("stop")),
+        )
+        return captured
+
+    def test_accepts_memories_kwarg(self, monkeypatch):
+        """memories 必须被透传给 _build_messages。"""
+        svc = LLMService()
+        captured = self._stub(svc, monkeypatch)
+        list(svc.generate_stream("hi", memories=["m1", "m2"]))
+        assert captured["memories"] == ["m1", "m2"]
+
+    def test_works_without_memories(self, monkeypatch):
+        """不传 memories 时也应正常（向后兼容）。"""
+        svc = LLMService()
+        captured = self._stub(svc, monkeypatch)
+        list(svc.generate_stream("hi"))
+        assert captured["memories"] is None

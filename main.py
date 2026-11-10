@@ -599,6 +599,7 @@ class VelApplication:
     def _check_idle_and_fullscreen(self) -> None:
         from core.state_manager import UserActivityState
         import ctypes
+        import ctypes.wintypes  # 独立的子模块，仅 import ctypes 无法通过 ctypes.wintypes 访问
         try:
             hwnd = ctypes.windll.user32.GetForegroundWindow()
             if hwnd:

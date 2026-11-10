@@ -18,6 +18,8 @@
 | V0010 | 2026-10-08 | **P1** | ✅ 已修复 | `core/config.py` 别名表缺 `health.*` 映射：schema 与用户数据中的无前缀键（`drink_interval_min`/`sedentary_threshold_min`/`active_hours_*`）**读不到**且 `set()` 后不更新 | `core/config.py` · `data/db/schema.sql` |
 | V0011 | 2026-10-08 | P3 | ✅ 已修复 | `update_service` 版本号双源（方法内硬编码 vs `settings.yaml` 的 `app.version`）+ `__init__` 日志谎称"已注册"（实际从未被接线） | `services/update_service.py` |
 | V0012 | 2026-11-10 | **P1** | ✅ 已修复 | `_search_duckduckgo_lib` 函数体不完整：取得 `DDGS` 后**没有任何调用**即隐式返回 `None` → 库通道永久失效，搜索一直落到 Bing/SearXNG/API（装不装 ddgs 都一样） | `services/search_service.py` |
+| V0013 | 2026-11-10 | **P1** | ✅ 已修复 | `generate_stream()` 缺 `memories` 参数，而 `chat_manager._stream_generate` 以 `memories=memories` 调用 → **流式对话每次都抛 TypeError 并被静默降级**为非流式 | `services/llm_service.py` |
+| V0014 | 2026-11-10 | **P1** | ✅ 已修复 | `_check_idle_and_fullscreen` 使用 `ctypes.wintypes.RECT()` 但只 `import ctypes`（子模块需显式导入）→ **每 5 秒抛 AttributeError**，全屏/闲置检测完全失效且日志被同一异常刷屏 | `main.py` |
 
 ---
 
@@ -132,3 +134,31 @@
   **断言 `DDGS().text` 确实被调用且传参正确**（`("测试", {"max_results": 3})`），另有旧包名回退、
   异常回退、缺包回退、非 dict 项跳过等覆盖。定向回归 23 passed。
 - **关联动作**：环境侧安装 `ddgs 9.16.1`（连带 lxml 6.1.3、primp 2.0.1），全量回归 **263 passed**（257 + 新增 6 项）。
+
+### V0013 · 流式对话接口不同构 ✅ 已修复（2026-11-10，P1）
+
+- **发现途径**：真机运行日志 —— `chat_manager: 流式生成异常: LLMService.generate_stream() got an unexpected keyword argument 'memories'`。
+- **缺陷**：`LLMService.generate()` 支持 `memories` 参数，但 `generate_stream()` 的签名是
+  `generate_stream(self, user_input)` —— 两个本应同构的方法接口不一致。而
+  `chat_manager._stream_generate` 两条路径都传 `memories=memories`：
+  - 流式路径（第 168 行）→ `TypeError` → 被 `except` 捕获 → 静默降级；
+  - 非流式路径（第 175 行）→ 正常。
+  结果：**流式对话从未真正跑起来**，每次都是"先失败再降级"，用户只看到回复、
+  看不到打字机流式效果。
+- **修法**：`generate_stream(self, user_input, memories: Optional[List[str]] = None)`
+  并把 `memories` 透传给 `_build_messages(memories)`（该方法本就支持）。
+- **测试**：`TestGenerateStreamSignature` 2 项 —— 断言 `memories` 被正确透传
+  （`["m1", "m2"]`），以及不传时向后兼容（`None`）；另有 `test_main_guards.py`
+  守卫调用点仍使用 `memories=` 关键字。
+
+### V0014 · 全屏/闲置检测每 5 秒崩溃 ✅ 已修复（2026-11-10，P1）
+
+- **发现途径**：真机运行日志 —— 同一异常每 5 秒重复一次，持续刷屏。
+- **缺陷**：`main.py::_check_idle_and_fullscreen` 中只写了 `import ctypes`，却使用
+  `ctypes.wintypes.RECT()`。`ctypes.wintypes` 是**独立子模块**，仅导入 `ctypes`
+  不会让它成为属性 → `AttributeError: module 'ctypes' has no attribute 'wintypes'`。
+- **影响**：该函数由 QTimer 每 5 秒调用，异常使**全屏检测与闲置状态切换完全失效**
+  （桌宠不会在用户全屏/离开时隐藏或暂停），且日志被同一异常淹没，掩盖其他问题。
+- **修法**：方法体内补 `import ctypes.wintypes`。
+- **测试**：`test_main_guards.py` 3 项 —— 用 `inspect.getsource` 断言方法体含该导入
+  （防再次被删），并验证 `ctypes.wintypes.RECT()` 可正常构造。

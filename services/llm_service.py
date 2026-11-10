@@ -264,10 +264,20 @@ class LLMService:
         logger.warning(f"LLM 恢复失败: {msg}")
         return False
 
-    def generate_stream(self, user_input: str) -> Any:
-        """流式生成回复（供未来使用）。"""
+    def generate_stream(self, user_input: str, memories: Optional[List[str]] = None) -> Any:
+        """流式生成回复。
+
+        Args:
+            user_input: 用户输入文本
+            memories: 可选，召回的相关记忆文本列表。与非流式 `generate` 保持同构 ——
+                此前本方法缺少该参数，而 `chat_manager._stream_generate` 以
+                `memories=memories` 调用，导致流式对话永远抛 TypeError 后降级。
+
+        Yields:
+            逐段回复文本。
+        """
         self.add_to_history("user", user_input)
-        messages = self._build_messages()
+        messages = self._build_messages(memories)
 
         payload = {
             "model": self.model,
