@@ -13,7 +13,7 @@
 | 项 | 要求 |
 |---|---|
 | 系统 | Windows 10 / 11 x64（仅桌面端） |
-| Python | 3.11 |
+| Python | 3.10 |
 | 大模型 | 本地 [Ollama](https://ollama.com/)（需自行启动） |
 
 ### 安装
@@ -81,7 +81,7 @@ config.set("llm.timeout", 90)                     # 写入 app_settings（用户
 
 ```bash
 # 回归测试（提交前必须全绿）
-.venv/Scripts/python.exe -m pytest tests -q
+venv/Scripts/python.exe -m pytest tests -q
 
 # 打包（PyInstaller）
 pyinstaller build.spec
