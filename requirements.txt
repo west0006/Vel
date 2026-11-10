@@ -1,13 +1,14 @@
 # =============================================
 # Vel - 智能AI桌宠 依赖清单
 # =============================================
-# Python 3.10
+# Python 3.10（统一版本；与 requirements 各包 wheel 兼容性已实测）
 # 安装: pip install -r requirements.txt
+# 环境体检结论见 doc/dev/盘点-质量与生态现状.md
 # =============================================
 
 # --- 桌面框架 ---
 PyQt5>=5.15.9
-pyqt5-tools>=5.15.9
+pyqt5-tools>=5.15.9       # 仅开发期需要（Qt Designer 等），运行时不依赖
 
 # --- LLM 通信 ---
 requests>=2.31.0
@@ -16,6 +17,11 @@ requests>=2.31.0
 faiss-cpu>=1.7.4
 sentence-transformers>=2.2.2
 numpy>=1.24.0
+
+# --- 联网搜索 ---
+# 降级链：ddgs（首选） → duckduckgo_search（旧包名，代码内回退） → DuckDuckGo API（兜底）
+# 两者皆未安装时仍可用 API 兜底，但搜索结果质量明显下降，建议安装 ddgs
+ddgs>=9.0.0
 
 # --- 数据库 ---
 # SQLite3 为 Python 标准库，无需额外安装
@@ -26,7 +32,7 @@ pywin32>=306              # Windows DPAPI 支持
 
 # --- 系统监测 ---
 psutil>=5.9.5
-pynvml>=11.5.0            # NVIDIA GPU 显存监控（可选）
+# pynvml>=11.5.0          # 可选：NVIDIA GPU 显存监控。未安装时 model_manager 自动跳过显存预算检查（有 try/except 保护），需要该功能时取消注释
 
 # --- 定时调度 ---
 APScheduler>=3.10.4
