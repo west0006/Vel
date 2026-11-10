@@ -20,10 +20,11 @@ TYPE_BORDER = {
     "warning": "#D98C7A",
     "memo": "#5A5A5A",
     "habit": "#FF6B35",
+    "pomodoro": "#E05A47",
 }
 TYPE_ICON = {
     "schedule": "📅", "health": "💧", "greeting": "☀️",
-    "warning": "⚠️", "memo": "📋", "habit": "🏆",
+    "warning": "⚠️", "memo": "📋", "habit": "🏆", "pomodoro": "🍅",
 }
 
 

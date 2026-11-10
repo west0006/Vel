@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from apscheduler.triggers.date import DateTrigger
 
-from core.event_bus import bus, EVENT_SCHEDULE_ALERT
+from core.event_bus import bus, EVENT_MEMO_REMINDER, EVENT_SCHEDULE_ALERT
 from core.service_registry import registry
 from utils.logger import get_logger
 
@@ -101,7 +101,7 @@ class MemoManager:
                 return
             job_id = f"memo_{memo_id}"
             scheduler._scheduler.add_job(
-                func=lambda: bus.publish("MEMO_REMINDER", {
+                func=lambda: bus.publish(EVENT_MEMO_REMINDER, {
                     "memo_id": memo_id, "content": content, "timestamp": datetime.now().isoformat(),
                 }),
                 trigger=DateTrigger(run_date=remind_at),
@@ -109,6 +109,41 @@ class MemoManager:
             )
         except Exception as e:
             logger.warning(f"备忘录提醒注册失败: {e}")
+
+    def restore_reminders(self) -> int:
+        """从数据库恢复仍未到期的活跃备忘录提醒。
+
+        APScheduler 的 DateTrigger job 只存在于内存，进程重启后需按 memo 表重注册。
+        已过期项不补发（避免重启时集中弹旧提醒），仅记录日志。
+
+        Returns:
+            成功恢复的提醒数量。
+        """
+        restored = 0
+        now = datetime.now()
+        for memo in self.get_active():
+            raw = memo.get("remind_at")
+            if not raw:
+                continue
+            text = str(raw)
+            try:
+                remind_at = datetime.fromisoformat(text)
+            except ValueError:
+                try:
+                    remind_at = datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    logger.warning(
+                        f"备忘录 {memo.get('id')} 的提醒时间无法解析: {raw!r}"
+                    )
+                    continue
+            if remind_at <= now:
+                logger.warning(f"备忘录 {memo.get('id')} 已过期，跳过提醒恢复")
+                continue
+            self._schedule_reminder(memo["id"], remind_at, memo.get("content", ""))
+            restored += 1
+        if restored:
+            logger.info(f"已恢复 {restored} 个备忘录提醒")
+        return restored
 
     def get_active(self) -> List[Dict[str, Any]]:
         """获取所有活跃备忘录。"""

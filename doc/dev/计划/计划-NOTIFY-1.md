@@ -1,6 +1,6 @@
 # 计划-NOTIFY-1 · 提醒可见性与重启恢复
 
-> **状态**：🚧 进行中 ｜ **最后核对**：2026-11-10
+> **状态**：✅ 完成 ｜ **最后核对**：2026-11-10
 > **来源**：`计划-当前待办.md` 的 NOTIFY-1，加上 2026-11-10 只读探索发现的 N1 / N2 / N3
 > **范围约定**：本计划只改 `doc/dev/` 内文档；`doc/README.md`、`doc/CURRENT-STATUS.md`、`doc/testing/buglist.md` 等 dev 外文档由其他会话处理，本任务不碰。
 
@@ -27,16 +27,16 @@
 
 ## 三、验收标准
 
-- [ ] `HabitManager.restore_reminders()` 能为所有 `enabled=1` 的习惯重注册每日 cron；重复调用不会产生重复 job（`replace_existing=True`）。
-- [ ] `MemoManager.restore_reminders()` 能为 `status='active'` 且 `remind_at` 在未来的备忘录重注册一次性 job；过期项跳过并记录日志。
-- [ ] `main.py` 启动时调用两个 restore，且注册顺序在 `ReminderScheduler` 之后。
-- [ ] `main.py` 订阅 `HABIT_REMINDER` / `MEMO_REMINDER` / `POMODORO_END`，使用 `subscribe_ui`（主线程）。
-- [ ] 三个通知的 `id` 每次触发唯一：习惯按日期、备忘录按 `memo_id + timestamp`、番茄钟按 `stage + 时间戳`。
-- [ ] 习惯通知的「打卡」按钮调用 `HabitManager.check_in()`；备忘录通知的「完成」按钮调用 `MemoManager.mark_done()`；番茄钟「开始专注」调用 `PomodoroTimer.start()`。
-- [ ] 现有 `schedule_alert` 的 `advance` / `due` 不再因同一个 `schedule_id` 被去重吞掉（N2，同批小修）。
-- [ ] 新增单测覆盖 restore / 通知 payload / id 唯一 / 按钮回调。
-- [ ] `venv/Scripts/python.exe -m pytest tests -q` 全绿（预计 297 + 新增）。
-- [ ] `python -m tools.audit_events` 中，上述三个提醒事件不再出现在“发布无订阅”。
+- [x] `HabitManager.restore_reminders()` 能为所有 `enabled=1` 的习惯重注册每日 cron；重复调用不会产生重复 job（`replace_existing=True`）。
+- [x] `MemoManager.restore_reminders()` 能为 `status='active'` 且 `remind_at` 在未来的备忘录重注册一次性 job；过期项跳过并记录日志。
+- [x] `main.py` 启动时调用两个 restore，且注册顺序在 `ReminderScheduler` 之后。
+- [x] `main.py` 订阅 `HABIT_REMINDER` / `MEMO_REMINDER` / `POMODORO_END`，使用 `subscribe_ui`（主线程）。
+- [x] 三个通知的 `id` 每次触发唯一：习惯按日期、备忘录按 `memo_id + timestamp`、番茄钟按 `stage + 时间戳`。
+- [x] 习惯通知的「打卡」按钮调用 `HabitManager.check_in()`；备忘录通知的「完成」按钮调用 `MemoManager.mark_done()`；番茄钟「开始专注」调用 `PomodoroTimer.start()`。
+- [x] 现有 `schedule_alert` 的 `advance` / `due` 不再因同一个 `schedule_id` 被去重吞掉（N2，同批小修）。
+- [x] 新增单测覆盖 restore / 通知 payload / id 唯一 / 按钮回调。
+- [x] `venv/Scripts/python.exe -m pytest tests -q` 全绿（313 passed）。
+- [x] `python -m tools.audit_events` 中，上述三个提醒事件不再出现在“发布无订阅”。
 
 ## 四、分步执行
 
@@ -91,3 +91,26 @@
 1. `HABIT_COMPLETED` / `HABIT_BROKEN` 是否要单独弹通知？本计划默认只用 `show_tip` 反馈。
 2. `POMODORO_PAUSE / RESUME / CANCEL` 是否要提示？本计划默认不提示。
 3. 现有 `drink_summary_{current_ml}` 等 id 的去重问题属健康提醒路径，本计划不动，单独记录。
+
+---
+
+## 七、完成记录（2026-11-10）
+
+| 项 | 结果 |
+|---|---|
+| P1 事件契约 | `core/event_bus.py` 新增 9 个常量；`habit` / `memo` / `pomodoro` / `sedentary_monitor` 的字符串直写全部替换，事件值不变 |
+| P2 重启恢复 | `HabitManager.restore_reminders()`、`MemoManager.restore_reminders()`；`main.py` 注册后调用；过期备忘录跳过并记日志 |
+| P3 通知接线 | `main.py` 三条 `subscribe_ui`；习惯/备忘录/番茄钟 handler；`ui/notification_bubble.py` 新增 `pomodoro` 类型 |
+| P4 N2 小修 | `schedule_alert` 通知 id → `schedule_{sid}_{stage}` |
+| P5 测试 | 新增 `tests/unit/test_reminder_restore.py`、`tests/unit/test_notify_wiring.py`，共 16 项 |
+| 全量回归 | `venv/Scripts/python.exe -m pytest tests -q` → **313 passed** |
+| 事件审计 | 发布 19 / 订阅 10；`HABIT_REMINDER`、`MEMO_REMINDER`、`POMODORO_END` 已不在“发布无订阅” |
+| 真机启动 | `timeout 15s venv/Scripts/python.exe main.py` → 日志出现“启动完成”、提醒调度器与习惯/备忘录注册完成；15 秒后由 timeout 终止（退出码 124 为预期），本次启动无 ERROR |
+| 未提交 | 按计划等待用户确认后再提交 |
+
+### 7.1 遗留（非本任务范围）
+
+- `CURRENT-STATUS.md`、`doc/testing/buglist.md` 等 dev 外文档由其他会话同步。
+- 启动日志显示 `ChatManager` 初始化早于 `memory_service` 注册（R1 记忆竞态）；已在 `计划-R1记忆竞态.md` 中修复（惰性获取）。
+- `schedule_alert` 的 `snooze` 仍复用同一 `stage=due` id，极端情况下第二次小睡提醒仍可能被 `_shown_ids` 去重；本次只解决 advance/due 跨阶段吞提醒。
+- `HABIT_COMPLETED` / `HABIT_BROKEN`、`POMODORO_PAUSE` / `RESUME` / `CANCEL` 仍为内部信号，按计划不弹通知。

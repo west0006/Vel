@@ -17,8 +17,9 @@ from PyQt5.QtWidgets import QApplication, QShortcut
 
 from utils.logger import log_init, get_logger
 from core.event_bus import (
-    bus, EVENT_EXIT_REQUEST, EVENT_HEALTH_REMINDER,
-    EVENT_SCHEDULE_ALERT, EVENT_SYSTEM_STATUS, EVENT_MODE_CHANGE
+    bus, EVENT_EXIT_REQUEST, EVENT_HABIT_REMINDER, EVENT_HEALTH_REMINDER,
+    EVENT_MEMO_REMINDER, EVENT_MODE_CHANGE, EVENT_POMODORO_END,
+    EVENT_SCHEDULE_ALERT, EVENT_SYSTEM_STATUS,
 )
 from core.state_manager import StateManager
 from core.service_registry import registry
@@ -240,6 +241,9 @@ class VelApplication:
         bus.subscribe_ui(EVENT_SCHEDULE_ALERT, self._on_schedule_alert)
         bus.subscribe_ui(EVENT_SYSTEM_STATUS, self._on_system_status)
         bus.subscribe_ui(EVENT_MODE_CHANGE, self._on_mode_change)
+        bus.subscribe_ui(EVENT_HABIT_REMINDER, self._on_habit_reminder)
+        bus.subscribe_ui(EVENT_MEMO_REMINDER, self._on_memo_reminder)
+        bus.subscribe_ui(EVENT_POMODORO_END, self._on_pomodoro_end)
         bus.subscribe_ui("CONTEXT_HINT", lambda d: self._chat_bubble.show_context_hint(d["text"]))
         logger.info("事件监听器已注册")
 
@@ -299,6 +303,101 @@ class VelApplication:
             return cb
         return None
 
+    def _on_habit_reminder(self, data: dict) -> None:
+        """习惯到点提醒：弹出气泡，支持直接打卡。"""
+        hid = data.get("habit_id", "")
+        name = data.get("name", "习惯")
+        day = datetime.now().strftime("%Y-%m-%d")
+
+        def on_action(action: str) -> None:
+            hm = registry.get("habit_manager")
+            if action == "checkin" and hm:
+                result = hm.check_in(hid)
+                if not result:
+                    self._floating_pet.show_tip("打卡失败，请稍后重试", 3000)
+                elif result.get("already"):
+                    self._floating_pet.show_tip("今天已经打卡啦~", 3000)
+                else:
+                    self._floating_pet.show_tip(
+                        f"✅ 打卡成功，连续 {result.get('streak', 1)} 天", 4000
+                    )
+            elif action == "later":
+                self._floating_pet.show_tip("好的，稍后记得打卡哦~", 3000)
+
+        self._notification_manager.push({
+            "id": f"habit_{hid}_{day}",
+            "title": "🏆 习惯提醒",
+            "message": f"该完成「{name}」啦~",
+            "priority": 1,
+            "duration_ms": 15000,
+            "buttons": [("✅ 打卡", "checkin", "primary"), ("稍后", "later", "secondary")],
+            "on_action": on_action,
+            "notif_type": "habit",
+        })
+
+    def _on_memo_reminder(self, data: dict) -> None:
+        """备忘录到点提醒：弹出气泡，支持标记完成。"""
+        memo_id = data.get("memo_id", "")
+        content = data.get("content", "")
+        timestamp = data.get("timestamp", "")
+
+        def on_action(action: str) -> None:
+            if action != "done":
+                return
+            mm = registry.get("memo_manager")
+            if mm and mm.mark_done(memo_id):
+                self._floating_pet.show_tip("✅ 备忘录已完成", 3000)
+            else:
+                self._floating_pet.show_tip("标记失败，请稍后重试", 3000)
+
+        self._notification_manager.push({
+            "id": f"memo_{memo_id}_{timestamp}",
+            "title": "📋 备忘录提醒",
+            "message": content,
+            "priority": 1,
+            "duration_ms": 15000,
+            "buttons": [("✅ 完成", "done", "primary"), ("知道了", "ok", "secondary")],
+            "on_action": on_action,
+            "notif_type": "memo",
+        })
+
+    def _on_pomodoro_end(self, data: dict) -> None:
+        """番茄钟阶段结束：专注结束提示休息，休息结束可一键开始下一轮。"""
+        stage = data.get("stage", "")
+        stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+
+        if stage == "focus_end":
+            title = "🍅 专注结束"
+            message = f"休息 {data.get('break_min', 5)} 分钟吧~"
+            buttons = [("知道了", "ok", "secondary")]
+
+            def on_action(action: str) -> None:
+                return
+        elif stage == "break_end":
+            title = "🍅 休息结束"
+            message = "准备好开始下一轮了吗？"
+            buttons = [("开始专注", "start", "primary"), ("稍后", "later", "secondary")]
+
+            def on_action(action: str) -> None:
+                if action != "start":
+                    return
+                pomo = registry.get("pomodoro_timer")
+                if pomo:
+                    pomo.start()
+        else:
+            return
+
+        self._notification_manager.push({
+            "id": f"pomodoro_{stage}_{stamp}",
+            "title": title,
+            "message": message,
+            "priority": 2,
+            "duration_ms": 15000,
+            "buttons": buttons,
+            "on_action": on_action,
+            "notif_type": "pomodoro",
+        })
+
     def _on_schedule_alert(self, data: dict) -> None:
         stage = data.get("stage", "due")
         sid = data.get("schedule_id", "")
@@ -316,7 +415,7 @@ class VelApplication:
                     self._floating_pet.show_tip("已超小睡上限", 3000)
 
         self._notification_manager.push({
-            "id": sid, "title": "📅 日程提醒", "message": msg,
+            "id": f"schedule_{sid}_{stage}", "title": "📅 日程提醒", "message": msg,
             "priority": 1 if stage == "advance" else 2, "duration_ms": 15000,
             "buttons": [("✅ 完成","complete","primary"),("🔔 5分钟后","snooze","secondary")],
             "on_action": cb,"notif_type": "schedule",
@@ -499,7 +598,9 @@ class VelApplication:
 
         try:
             from modules.memo import MemoManager
-            registry.register("memo_manager", MemoManager())
+            memo = MemoManager()
+            registry.register("memo_manager", memo)
+            memo.restore_reminders()
         except Exception as e:
             logger.warning(f"备忘录管理器失败: {e}")
 
@@ -530,7 +631,9 @@ class VelApplication:
 
         try:
             from modules.habit import HabitManager
-            registry.register("habit_manager", HabitManager())
+            habit = HabitManager()
+            registry.register("habit_manager", habit)
+            habit.restore_reminders()
             logger.info("习惯模块已注册")
         except Exception as e:
             logger.warning(f"习惯模块失败: {e}")

@@ -13,7 +13,12 @@ from PyQt5.QtCore import QTimer
 from apscheduler.schedulers.qt import QtScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from core.event_bus import bus, EVENT_HEALTH_REMINDER
+from core.event_bus import (
+    bus,
+    EVENT_HEALTH_REMINDER,
+    EVENT_POMODORO_END,
+    EVENT_POMODORO_START,
+)
 from core.service_registry import registry
 from core.state_manager import StateManager, UserActivityState
 from utils.logger import get_logger
@@ -93,8 +98,8 @@ class SedentaryMonitor:
 
         logger.info(f"久坐监控器已启动 (阈值={self._threshold_min}min)")
 
-        bus.subscribe_sync("POMODORO_START", lambda d: self._pause_for_pomodoro())
-        bus.subscribe_sync("POMODORO_END", lambda d: self._resume_from_pomodoro())
+        bus.subscribe_sync(EVENT_POMODORO_START, lambda d: self._pause_for_pomodoro())
+        bus.subscribe_sync(EVENT_POMODORO_END, lambda d: self._resume_from_pomodoro())
 
     def _pause_for_pomodoro(self) -> None:
         self._pomodoro_paused = True

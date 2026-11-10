@@ -8,7 +8,12 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.event_bus import bus
+from core.event_bus import (
+    bus,
+    EVENT_HABIT_BROKEN,
+    EVENT_HABIT_COMPLETED,
+    EVENT_HABIT_REMINDER,
+)
 from core.service_registry import registry
 from utils.logger import get_logger
 
@@ -50,7 +55,7 @@ class HabitManager:
             scheduler = registry.get("reminder_scheduler")
             if scheduler and scheduler._scheduler:
                 scheduler._scheduler.add_job(
-                    func=lambda: bus.publish("HABIT_REMINDER", {
+                    func=lambda: bus.publish(EVENT_HABIT_REMINDER, {
                         "habit_id": hid, "name": name, "timestamp": datetime.now().isoformat(),
                     }),
                     trigger=CronTrigger(hour=h, minute=m),
@@ -58,6 +63,27 @@ class HabitManager:
                 )
         except Exception as e:
             logger.warning(f"习惯提醒注册失败: {e}")
+
+    def restore_reminders(self) -> int:
+        """从数据库恢复所有启用习惯的每日提醒。
+
+        习惯提醒由 APScheduler 内存中的 cron job 承载，进程重启后即丢失；
+        启动时必须按 habit 表重新注册，否则已有习惯永远不会再提醒。
+
+        Returns:
+            成功恢复的习惯数量。
+        """
+        restored = 0
+        for habit in self.list_all():
+            if not habit.get("enabled"):
+                continue
+            self._schedule_reminder(
+                habit["id"], habit["name"], habit.get("target_time", "21:00")
+            )
+            restored += 1
+        if restored:
+            logger.info(f"已恢复 {restored} 个习惯提醒")
+        return restored
 
     def check_in(self, hid: str) -> Optional[Dict[str, Any]]:
         """打卡。返回新 streak 信息。"""
@@ -96,7 +122,7 @@ class HabitManager:
             )
             db.commit()
 
-            bus.publish("HABIT_COMPLETED", {"habit_id": hid, "name": name, "streak": streak})
+            bus.publish(EVENT_HABIT_COMPLETED, {"habit_id": hid, "name": name, "streak": streak})
             logger.info(f"习惯打卡: {name} streak={streak}")
             return {"name": name, "streak": streak, "longest": longest, "total": total, "already": False}
         except Exception as e:
@@ -111,7 +137,7 @@ class HabitManager:
                 return
             db.execute("UPDATE habit SET streak=0, last_check_date=? WHERE id=?", (date.today().isoformat(), hid))
             db.commit()
-            bus.publish("HABIT_BROKEN", {"habit_id": hid})
+            bus.publish(EVENT_HABIT_BROKEN, {"habit_id": hid})
             logger.info(f"习惯请假: {hid}")
         except Exception as e:
             logger.warning(f"习惯请假失败: {e}")

@@ -11,7 +11,14 @@ from typing import Any, Callable, Dict, Optional
 
 from PyQt5.QtCore import QTimer, QObject, pyqtSignal
 
-from core.event_bus import bus
+from core.event_bus import (
+    bus,
+    EVENT_POMODORO_CANCEL,
+    EVENT_POMODORO_END,
+    EVENT_POMODORO_PAUSE,
+    EVENT_POMODORO_RESUME,
+    EVENT_POMODORO_START,
+)
 from core.service_registry import registry
 from utils.logger import get_logger
 
@@ -58,7 +65,7 @@ class PomodoroTimer(QObject):
             self._start_time = datetime.now()
             self._timer.start()
             self.state_changed.emit("running")
-            bus.publish("POMODORO_START", {"focus_min": self._focus_sec // 60})
+            bus.publish(EVENT_POMODORO_START, {"focus_min": self._focus_sec // 60})
             logger.info(f"番茄钟（休息后直接启动）: {self._focus_sec // 60}分钟")
             return
         self._state = "running"
@@ -66,7 +73,7 @@ class PomodoroTimer(QObject):
         self._start_time = datetime.now()
         self._timer.start()
         self.state_changed.emit("running")
-        bus.publish("POMODORO_START", {"focus_min": self._focus_sec // 60})
+        bus.publish(EVENT_POMODORO_START, {"focus_min": self._focus_sec // 60})
         logger.info(f"番茄钟启动: {self._focus_sec // 60}分钟")
     def pause(self) -> None:
         if self._state != "running":
@@ -75,7 +82,7 @@ class PomodoroTimer(QObject):
         self._timer.stop()
         self._state = "paused"
         self.state_changed.emit("paused")
-        bus.publish("POMODORO_PAUSE", {})
+        bus.publish(EVENT_POMODORO_PAUSE, {})
 
     def resume(self) -> None:
         if self._state != "paused":
@@ -84,14 +91,14 @@ class PomodoroTimer(QObject):
         self._state = "running"
         self._timer.start()
         self.state_changed.emit("running")
-        bus.publish("POMODORO_RESUME", {})
+        bus.publish(EVENT_POMODORO_RESUME, {})
 
     def cancel(self) -> None:
         self._timer.stop()
         self._state = "idle"
         self._remaining = 0
         self.state_changed.emit("idle")
-        bus.publish("POMODORO_CANCEL", {})
+        bus.publish(EVENT_POMODORO_CANCEL, {})
         logger.info("番茄钟已取消")
 
     def _on_tick(self) -> None:
@@ -107,7 +114,7 @@ class PomodoroTimer(QObject):
                 self._remaining = 0
                 self.state_changed.emit("idle")
                 self.tick.emit(0)
-                bus.publish("POMODORO_END", {"stage": "break_end"})
+                bus.publish(EVENT_POMODORO_END, {"stage": "break_end"})
 
     def _enter_break(self) -> None:
         is_long = (self._completed_count % self._long_break_interval == 0)
@@ -115,7 +122,7 @@ class PomodoroTimer(QObject):
         self._state = "break"
         self._remaining = break_sec
         self.state_changed.emit("break")
-        bus.publish("POMODORO_END", {
+        bus.publish(EVENT_POMODORO_END, {
             "stage": "focus_end",
             "break_min": break_sec // 60,
             "is_long": is_long,
